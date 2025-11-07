@@ -1,0 +1,606 @@
+---
+title: "Week 3 Practical"
+author: "Christy Choi"
+date: "2025-10-14"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r}
+rm(list = ls()) #removes all objects from workspace
+gc() #clear memory
+```
+
+## 3.5.1.1. Vector
+
+Vector data (geospatial) represents diecrete things with exact shapes: -
+Points: single locations (e.g., bus stops). - Lines: connected points
+(e.g., roads, rivers). - Polygons: enclosed areas (e.g., building
+footprints, city boundaries)
+
+1.  Downloaded the GeoPackage, Check what is inside using function
+    st_layers()
+
+```{r}
+library(sf)
+library(here)
+st_layers(here::here("gadm41_AUS.gpkg"))
+```
+
+2.  Read in GeoPackage layer for the whole of Australia (layer ending in
+    0)  
+
+```{r}
+library(sf)
+Ausoutline <- st_read(
+  here::here("gadm41_AUS.gpkg"),
+  layer='ADM_ADM_0')
+```
+
+```{r}
+#check that the CRS of sf or sp objects
+print(Ausoutline)
+```
+
+## 3.5.1.2. WGS84
+
+World Geodetic System 84 (WGS84) - most common global projection
+systems, used in nearly all GPS devices -\> datum/ ellipsoid, associated
+with CRS use worldwide - Coordinates are latitude, longitude
+(degrees). - The most common code for it is EPSG:4326 (see below). -
+Great for storing/sharing global locations; for measurement, reproject
+to a suitable projected CRS.
+
+## 3.5.1.3. Proj4
+
+Identify a coordinate reference system: proj4_string -\> tells the
+computer where on the earth to locate the coordinates that make up the
+geometries in your file and what distortions to apply
+
+```{r}
+library(sf)
+st_crs(Ausoutline)$proj4string 
+```
+
+-   here it uses latitude and logitude, so it's a geographic NOT
+    projected CRS
+
+## 3.5.1.4. EPSG
+
+EPSG - short numbers represent all coordinate reference systems in the
+world and link directly to proj4 strings
+
+EPSG code for the WGS84 (usually the default CRS for most spatial data)
+is 4326 (for lat/long degrees)
+
+1.  In this case we have CSR - BUT IF Ausoutline don't have a spatial
+    reference system -\> you can label it using st_set_crs() just like
+    below:
+
+```{r}
+Ausoutline <- Ausoutline %>%
+  st_set_crs(., 4326) #. refers to using results from previous pipe
+```
+
+or you can add it when you load the data by simply adding
+st_set_crs(4326) after load/ reading the layer (refer too 3.5.1.1)!!
+
+## 3.5.1.5. Reprojecting your spatial data
+
+Reprojecting = changing the CRS of your spatial data (degrees, e.g.,
+WGS84 / EPSG:4326)to -\> projected CRS (metres, e.g., UTM, national
+grids) to -\> allow you to measure distances/areas correctly\
+match with other data sets to use specific tools and packages (e.g. some
+require data in WGS84 because it’s designed for web maps using
+latitude/longitude)
+
+E.g. Apply this when want to measure the distance of a line object, or
+the distance between two polygons
+
+```{r}
+AusoutlinePROJECTED <- Ausoutline %>%
+  st_transform(.,3112)
+
+print(AusoutlinePROJECTED)
+```
+
+## What we did so far
+
+-\> we loaded data in sf::st_read() -\> which stores spatial features
+(points, lines, polygons) along with their coordinates -\> st_set_crs()
+labels Ausoutline to WSG84 -\> we reprojected the data in st_transform()
+-\> which changed coordinates in the geometry column as they are
+interpreted in a different CRS
+
+## 3.5.2. WorldClim data
+
+From here, will use raster data sources and process techniques Rasters
+-\> grids of cell with individual values, where each cell stores a value
+about that spot on Earth
+
+```{r}
+# use for spatial data analysis
+# use when working with raster and vector data 
+library(raster)
+library(terra)
+```
+
+```{r}
+# look at raster layer in jan (January)
+jan <- terra::rast(here::here("wc2.1_5m_tmax","wc2.1_5m_tmax_01.tif"))
+jan
+```
+
+```{r}
+#quick look at data, we see its in geographic projection of WS84
+plot(jan)
+```
+
+Transforming one CRS to another:
+
+```{r}
+# set the proj 4 to a new object
+pr1 <- terra::project(jan, "+proj=moll +lon_0=0 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs")
+plot(pr1)
+```
+
+Breakdown of the proj4 code:
+
++proj=moll
+
++lon_0=0 -\> central meridian is set to 0° longitude
+
++x_0=0 +y_0=0 -\> No false easting/northing — origin is at (0,0)
+
++ellps=WGS84 -\> Use the WGS84 ellipsoid — standard for global datasets
+
++datum=WGS84 -\> Datum also set to WGS84
+
++units=m -\> Output coordinates will be in meters
+
++no_defs -\> Prevents loading default parameters from external files
+
+NOW back to WGS84:
+
+```{r}
+pr1 <- pr1 %>%
+  terra::project(., "+proj=longlat +datum=WGS84 +no_defs +type=crs")
+```
+
+```{r}
+# run this plot code separately (mine usually works like that)
+plot(pr1)
+```
+
+## 3.5.3. Data Loading
+
+what we are doing here: 1. list all the files stored within our
+directory using -\> dir_info() from sf package 2. use dplyr in
+conjunction with str_detect() from stringr to search for files
+containing .tif
+
+1.  
+
+```{r}
+#load this package in order to use dir_info()
+library(fs)
+```
+
+```{r}
+# using the function dir_info() to list all the files within this folder
+dir_info("wc2.1_5m_tmax")
+```
+
+2.  use dplyr to select files we want
+
+```{r}
+library(tidyverse)
+listfiles <- dir_info("wc2.1_5m_tmax") %>%
+  filter(str_detect(path, ".tif")) %>%
+  #filtered rows to keep those only whose path contans .tif (raster files)
+  dplyr::select(path) %>%
+  #the function select() exists in both dplyr and raster package, REMEMBER TO USE dplyr::select !!!
+  pull()
+  #pull function is from dplyr too
+  #pull function is like $ when extracting columns
+```
+
+```{r}
+listfiles
+```
+
+## Load data into a SpatRaster
+
+SpatRaster -\> a collection of raster layers with the same spatial
+extent and resolution
+
+```{r}
+worldclimtemp <- listfiles%>%
+  terra::rast()
+```
+
+```{r}
+worldclimtemp
+```
+
+The above has loaded 12 months of maximum temp data in order (12 layers
+nlyr\*)
+
+To access the january layer only:
+
+```{r}
+worldclimtemp[[1]]
+```
+
+Rename the layers (e.g. 1 -\> Jan) within the stack
+
+```{r}
+month <- c("Jan", "Feb", "Mar", "Apr", "May","Jun","Jul","Aug","Sep","Oct","Nov","Dec")
+
+names(worldclimtemp) <- month
+```
+
+Try with the new name!! Does it comes out with same result as 1?
+
+```{r}
+worldclimtemp$Jan
+```
+
+## 3.5.4. Raster Location Use RasterStack 
+
+## -\> extract data with a single command!! 
+
+## Below, we will make a df using some sample sites of - Australian cities/ towns
+
+```{r}
+site <- c("Brisbane", "Melbourne", "Perth", "Sydney", "Broome", "Darwin", "Orange", "Bunbury", "Cairns", "Adelaide", "Gold Coast", "Canberra", "Newcastle", "Wollongong", "Logan City" )
+
+lon <- c(153.03, 144.96, 115.86, 151.21, 122.23, 130.84, 149.10, 115.64, 145.77, 138.6, 153.43, 149.13, 151.78, 150.89, 153.12)
+
+lat <- c(-27.47, -37.91, -31.95, -33.87, 17.96, -12.46, -33.28, -33.33, -16.92, -34.93, -28, -35.28, -32.93, -34.42, -27.64)
+
+#Put all of this inforamtion into one list 
+samples <- data.frame(site, lon, lat, row.names="site")
+
+# Extract the data from the Rasterstack for all points 
+AUcitytemp<- terra::extract(worldclimtemp, samples)
+```
+
+## 3.6. Part2 Descriptive Statistics
+
+## 3.6.1. Data Preparation Perth as an example:
+
+```{r}
+Perthtemp <- AUcitytemp %>%
+  filter(site=="Perth")
+```
+
+## 3.6.2. Histogram Histogram lets us see the distribution of our data
+
+Make a histogram of Perth's temperature: \* The Perthtemp tibble stored
+our data as double First, base hist()function needs the data in our
+tibble to be numeric:
+
+```{r}
+#change it to numeric!!
+hist(as.numeric(Perthtemp))
+```
+
+In the above our x axis is our temp and y axis is freq of occurance
+
+PROBLEM!! THERE IS AN OUTLIER!! THE ID NAME 3 IS COUNTED IN AS A TEMP!!
+
+```{r}
+library(tidyverse)
+# define where you want the breaks in the histogram
+userbreak <- c(14,16,18,20,22,24,26,28,30,32)
+
+# remove the ID and site columns
+Perthtemp <- AUcitytemp %>%
+  filter(site=="Perth")
+
+t <- Perthtemp %>%
+  dplyr::select(Jan:Dec)
+```
+
+CHECK THE RANGE AND EDIT ABOVE CODE TO THE FIT THE RANGE cus his example
+was 8,10,12,14,16,18,20,22,24,26
+
+```{r}
+range(as.numeric(t), na.rm = TRUE)
+```
+
+```{r}
+  hist((as.numeric(t)),
+     breaks=userbreak,
+     col="red",
+     main="Histogram of Perth Temperature",
+     xlab="Temperature",
+     ylab="Frequency")
+```
+
+Check histogram information R generated
+
+```{r}
+histinfo <- as.numeric(t) %>%
+  as.numeric() %>%
+  hist(.)
+histinfo
+```
+
+## 3.6.3. Using more data 
+
+## We want to see distribution of temperature for whole of Australia in Jan 
+
+## Check the layer by plotting geometry through:
+
+```{r}
+plot(Ausoutline$geom)
+```
+
+.shp file is quite complex (lots of points), so we simplify it with
+st_simplify() \* helpful to check what the data u load in R looks like
+
+dTolerance -\> controls the level of generalisation in the units of the
+map
+
+Can also set perserveTopology to TRUE or FALSE -\> true when polygons
+are not reoved and holes in polygon are retained
+
+```{r}
+AusoutSIMPLE <- Ausoutline%>%
+  st_simplify(., dTolerance = 1000)%>%
+  st_geometry()%>%
+  plot()
+```
+
+To prevent simplfiy a potential important variable, Should always use
+the real file: First, we ensure both layers are in the same CRS when we
+combine so:
+
+```{r}
+print(Ausoutline)
+```
+
+```{r}
+crs(worldclimtemp)
+```
+
+Ok, continue:
+
+```{r}
+Austemp <- Ausoutline%>%
+  #now crop our temp data to the extent
+  terra::crop(worldclimtemp,.)
+
+#plot the output 
+plot(Austemp)
+```
+
+PROBLEM!! Noticed that the whole of Australia the raster is not
+perfectly clipped on exact outline!!!
+
+SO, NEED TO GET RASTER DATA WITHIN OUTLINE OF THE SHAPE: WE USE: trhge
+-\> mask() function (uses a cookie cutter of the raster with vector
+layer)
+
+```{r}
+exactAus <- terra::mask(Austemp, Ausoutline)
+# what it does is remove al raster cells that fall outside of the shape of Ausoutline
+```
+
+Now we re-compute the histogram for Australia in March (it is third in
+the raster so [3])
+
+```{r}
+#subset using the known location of the raster
+hist(exactAus[[3]], col="red", main ="March temperature")
+```
+
+###3.6.4. Histogram with ggplot Need to make our raster into a df to be
+compatible with ggplot2, using a df or tibble
+
+```{r}
+#exactAus contains temp values with all other outside the country's shape set to NA
+exactAusdf <- exactAus %>%
+  as.data.frame()   #convert raster in tabular format
+```
+
+```{r}
+library(ggplot2)
+# set up the basic histogram
+gghist <- ggplot(exactAusdf, #start a plot using exactAusdf dataframe
+                 aes(x=Mar)) +  #x-axis as March
+  geom_histogram(color="black", 
+                 fill="white")+ #ggplot2 chooses the bin with by default unless specified
+  labs(title="Ggplot2 histogram of Australian March temperatures", 
+       x="Temperature", 
+       y="Frequency")
+# add a vertical line to the hisogram showing mean tempearture
+gghist + geom_vline(aes(xintercept=mean(Mar, #add a vertical line (at the mean of March)
+                                        na.rm=TRUE)), #ensure all missing values r ignored
+            color="blue", 
+            linetype="dashed", 
+            size=1)+ #select thickness of line as 1
+  theme(plot.title = element_text(hjust = 0.5)) #centre the plot title horizontally
+```
+
+## Plot Multiple Months of Temperature Data On the Same Histogram
+
+1.  Put our variable (months) into a column using pivot_longer()
+2.  Place them into a new column called Month and their values in
+    another column called Temp
+
+```{r}
+squishdata<-exactAusdf%>%
+  pivot_longer( #reshape your data from wide to long format(part of tidyr)
+  cols = 1:12, #tell R to reshape the first 12 columns
+  names_to = "Month", #column names will become values in a new column: Month
+  values_to = "Temp" #cell values will go into a new column Temp
+)
+```
+
+3.  Subset the datam selecting two months using filter() from dplyr
+
+```{r}
+twomonths <- squishdata %>% #using the long format data frame from above
+  # | = OR
+  filter(., Month=="Jan" | Month=="Jun") #filter() keeping only rows where conditions= TRUE
+  #in this case keep the rows where month is Jan OR Jun
+```
+
+4.  Get the mean for each month we selected -\> using group_by(),
+    summarise()
+
+```{r}
+meantwomonths <- twomonths %>% #using the filtered long format dataframe
+  group_by(Month) %>% 
+  #group data by Month column - grouped all rows of Jan tgt and all rows of Jun tgt
+  summarise(mean=mean(Temp, na.rm=TRUE)) #calculate mean for each group, ensure NaN ignored
+
+meantwomonths
+```
+
+5.  Select colour and fill based on variable
+
+```{r}
+ggplot(twomonths, aes(x=Temp, color=Month, fill=Month)) + 
+#colour and fill -> distinguish Jan and Jun by colour
+  geom_histogram(position="identity", alpha=0.5)+
+  # position= identity -> allows histogram to overlap rather than stack
+  #0.5 transparency
+  geom_vline(data=meantwomonths, #using the summary data calculated previously
+             aes(xintercept=mean, #place the line at the average temperature
+                 color=Month), #colour matches the line colour to the histogram colour
+             linetype="dashed")+
+  labs(title="Ggplot2 histogram of Australian Jan and Jun
+       temperatures",
+       x="Temperature",
+       y="Frequency")+
+  theme_classic()+ # apply clean, minimal theme with no background grid
+  theme(plot.title = element_text(hjust = 0.5)) #centre plot title horizontally
+```
+
+Intercept is the mean we just calculated, with lines based on the
+coloumn variable Note: Bin size defaults to 30 in ggplot2 Non-finate
+values refers to lots of NAs (no data)
+
+The code below: - dropped all the NAs with drop_na()
+
+-   made sure that the Month column has the levels specified, which will
+    map in descending order (e.g. Jan, Feb, March..)
+
+-   selected a bin width of 5 and produced a faceted plot…
+
+```{r}
+data_complete_cases <- squishdata %>% #use long formate temp data
+  drop_na()%>% #remove any rows where Temp is NA
+  mutate(Month = factor(Month, levels = c("Jan","Feb","Mar",
+                                          "Apr","May","Jun",
+                                          "Jul","Aug","Sep",
+                                          "Oct","Nov","Dec"))) 
+  # convert month, ensure months appear in calendar order not alphabetically
+
+# Plot faceted histogram
+#start a ggplot using the cleaned data above
+ggplot(data_complete_cases, aes(x=Temp, na.rm=TRUE))+ 
+  #map x-axis as Temp
+  #na.rm=TRUE -> remove/ skip over NA values before calculation
+  geom_histogram(color="black", binwidth = 5)+ 
+  #bar outline as black, group temp values into bins 5 degree wide
+  labs(title="Ggplot2 faceted histogram of Australian temperatures", 
+       x="Temperature",
+       y="Frequency")+
+  facet_grid(Month ~ .)+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Looks good!! Higher temp in Dec-Feb (Australia Summer), Make Sense !!
+
+## Interative Histogram using plotly...
+
+```{r}
+library(plotly)
+# split the data for plotly based on month
+
+jan <- squishdata %>%
+  drop_na() %>%
+  filter(., Month=="Jan")
+
+jun <- squishdata %>%
+  drop_na() %>%
+  filter(., Month=="Jun")
+
+# give axis titles
+x <- list (title = "Temperature")
+y <- list (title = "Frequency")
+
+# set the bin width
+xbinsno<-list(start=0, end=40, size = 2.5)
+
+# plot the histogram calling all the variables we just set
+ihist<-plot_ly(alpha = 0.6) %>%    #start a plotly plot, 0.6 transparency
+        add_histogram(x = jan$Temp,    #use jan temperature
+        xbins=xbinsno, name="January") %>%   
+        #applies the bins setting, label the legend January
+        #same codes for june
+        add_histogram(x = jun$Temp,
+        xbins=xbinsno, name="June") %>% 
+        layout(barmode = "overlay", xaxis=x, yaxis=y)   #allows overlap rather than stack
+
+ihist #display plot
+```
+
+## Other Descriptive Statistics
+
+```{r}
+# mean per month
+meanofall <- squishdata %>%
+  group_by(Month) %>%
+  summarise(mean = mean(Temp, na.rm=TRUE))
+
+# print the top 1
+head(meanofall, n=1)
+```
+
+-   gives April as Month is a character column, R sorted it
+    alphabetically
+-   head(meanofall, n=1) -\> print the first alphabetically sorted
+    month, which is April
+
+```{r}
+# standard deviation per month
+sdofall <- squishdata %>%
+  group_by(Month) %>%
+  summarize(sd = sd(Temp, na.rm=TRUE))
+
+# maximum per month
+maxofall <- squishdata %>%
+  group_by(Month) %>%
+  summarize(max = max(Temp, na.rm=TRUE))
+
+# minimum per month
+minofall <- squishdata %>%
+  group_by(Month) %>%
+  summarize(min = min(Temp, na.rm=TRUE))
+
+# Interquartlie range per month, THE MIDDLE SPREAD OF THE DATA (IGNORING OUTLIERS)
+#GREAT FOR UNDERSTANDING TYPICAL VARIABILITY
+IQRofall <- squishdata %>%
+  group_by(Month) %>%
+  summarize(IQR = IQR(Temp, na.rm=TRUE))
+
+# Storing multiple outputs in one list..
+lotsofstats <- squishdata %>%
+  group_by(Month) %>%
+  summarize(IQR = IQR(Temp, na.rm=TRUE), 
+            max=max(Temp, na.rm=T))
+
+# or you want to know the mean (or some other stat) 
+#for the whole year as opposed to each month...
+
+meanwholeyear=squishdata %>%
+  summarize(meanyear = mean(Temp, na.rm=TRUE))
+```

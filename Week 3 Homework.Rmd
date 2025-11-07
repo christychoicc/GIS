@@ -1,0 +1,168 @@
+---
+title: "Week 3 Homework"
+author: "Christy Choi"
+date: "2025-10-20"
+output: html_document
+---
+
+# Week 3 Task 
+
+The task is to manipulate some raster data and produce some descriptive statistics. Climatic models fed into the latest Intergovernmental Panel on Climate Change (IPCC), the models are divided into Shared Socioeconomic Pathways known as SSPs, ranging from [SSP1](https://view.es-doc.org/?renderMethod=name&project=cmip6&type=cim.2.designing.NumericalExperiment&client=esdoc-url-rewrite&name=ssp126) (lots of mitigation and adaption) to [SSP5](https://view.es-doc.org/?renderMethod=name&project=cmip6&type=cim.2.designing.NumericalExperiment&client=esdoc-url-rewrite&name=ssp126) (fossil fuel development). The [Carbon Brief explainer](https://www.carbonbrief.org/explainer-how-shared-socioeconomic-pathways-explore-future-climate-change) has more information on the scenarios.
+
+For any country in the World produce descriptive statistics that show the difference in maximum temperature for key cities between SSP1 and SSP5 for the years 2081-2100, using any model and resolution.
+
+-   [WorldClim future projections](https://www.worldclim.org/data/cmip6/cmip6_clim2.5m.html)
+
+-   [Country outlines](https://gadm.org/data.html)
+
+-   [World city points](https://hub.arcgis.com/datasets/esri::world-cities/explore?location=3.049068%2C-178.464838%2C1.71)
+
+First step always clear memory!!
+
+```{r}
+rm(list = ls()) #removes all objects from workspace
+gc() #clear memory
+```
+
+## Load Geopackage
+
+```{r}
+library(sf)
+library(here)
+st_layers(here::here("gadm41_GBR.gpkg"))
+```
+
+```{r}
+library(sf)
+UKoutline <- st_read(
+  here::here("gadm41_GBR.gpkg"),
+  layer='ADM_ADM_0')
+```
+
+```{r}
+#check that the CRS of sf or sp objects
+print(UKoutline)
+```
+
+Double check if your file have a valid CRS using proj4, in this case YES!!!
+
+```{r}
+library(sf)
+st_crs(UKoutline)$proj4string
+```
+
+## Loading in Data
+
+Load in packages first:
+
+```{r}
+# use for spatial data analysis
+# use when working with raster and vector data 
+library(raster)
+library(terra)
+```
+
+## Load SSP126 file and SSP585:
+
+\*REMEMBER TO INCLUDE .tif AFTER THE FILE NAME!!!
+
+```{r}
+# look at raster layer ssp126
+ssp126 <- terra::rast(here::here("wc2.1_2.5m_tmax_MIROC6_ssp126_2081-2100.tif"))
+ssp126
+```
+
+```{r}
+# look at raster layer ssp126
+ssp585 <- terra::rast(here::here("wc2.1_2.5m_tmax_MIROC6_ssp585_2081-2100.tif"))
+ssp585
+```
+
+```{r}
+library(dplyr)
+```
+
+NOT NEEDED I THINK: Turn into one "maximum temperature" value
+
+```{r}
+max126 <- terra::app(ssp126, max, na.rm =TRUE)
+max585 <- terra::app(ssp585, max, na.rm =TRUE)
+
+max126
+max585
+```
+
+```{r}
+plot(max126)
+plot(max585)
+```
+
+## Clean Data - World Cities Data
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+WorldData <- read.csv("World_Cities.csv",
+                        na="NULL")
+```
+
+```{r}
+#check what coloumns I need
+Datatypelist <- WorldData %>%
+  summarise_all(class)%>%
+  pivot_longer(everything(),
+               names_to="All_variables",
+               values_to="Variable_class")
+
+Datatypelist
+```
+
+```{r}
+#select columns of data we need
+Country_Data <- WorldData%>%
+  dplyr::select(c(X, Y, CNTRY_NAME, CITY_NAME, ADMIN_NAME, POP))
+```
+
+```{r}
+library(janitor)
+```
+
+```{r}
+# Filter data for United Kingdom only
+UKonlyData <- Country_Data %>%
+  janitor::clean_names()%>%
+    dplyr::filter(cntry_name == "United Kingdom")
+  
+```
+
+## Back to SSP126 and SSP585
+
+Using rastered SSP126 and SSP585 (they have 4320),
+
+Now change raster to EPSG:3857
+
+```{r}
+ssp126_3857 <- terra::project(ssp126, "EPSG:3857")
+ssp585_3857<- terra::project(ssp585, "EPSG:3857")
+```
+
+```{r}
+ssp126_3857
+ssp585_385
+```
+
+```{r}
+site <- c("Dundee", "Southampton", "Fawley", "Belfast", "Sheffield", "Birmingham", "London", "Hunterston", "Teesport", "Edinburgh", "Glasgow", "Leeds", "Manchester", "Cardiff")
+
+lon <- c(-2.9707, -1.4043, -1.3270, -5.9301, -1.4701, -1.8904, -0.1278, -4.8960, -1.1650, -3.1883, -4.2518, -1.5491, -2.2426, -3.1791)
+
+lat <- c(56.4620, 50.9097, 50.8330, 54.5973, 53.3811, 52.4862, 51.5074, 55.6960, 54.6150, 55.9533, 55.8642, 53.8008, 53.4808, 51.4816)
+
+#Put all of this inforamtion into one list 
+samples <- data.frame(site, lon, lat, row.names="site")
+
+# Extract the data from the Rasterstack for all points 
+UKcitytemp<- terra::extract(, samples)
+```

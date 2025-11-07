@@ -1,0 +1,213 @@
+---
+title: "Week 2 Homework"
+author: "Christy Choi"
+date: "2025-10-13"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r}
+rm(list = ls()) #removes all objects from workspace
+gc() #clear memory
+```
+
+## Install Packages
+
+```{r}
+#Load necessary packages
+#You only install the packages once in your computer
+install.packages("sf")
+install.packages("tidyverse")
+install.packages("tmap")
+```
+
+```{r}
+library(sf) #for spatial data
+library(tidyverse) #for data wrangling
+library(tmap) #for thematic mapping
+```
+
+```{r}
+#check where your current working directory is 
+#you want your data and workbook saved within your working directory to avoid errors
+here:here()
+```
+
+## Load and Read Data
+
+```{r}
+WashingData <- read.csv("Report_Card_Assessment_Data_2018-19_School_Year_20251013.csv",
+                        na="NULL")
+                        
+shape <- st_read("C:\\Users\\choic\\OneDrive\\CASA\\GIS\\week2_homework\\Washington_Counties_with_Natural_Shoreline___washsh_area\\Washington_Counties_with_Natural_Shoreline___washsh_area.shp")
+                
+```
+
+## To answer the Question:
+
+Calculate the average percentage of science students in all grades per
+county meeting the required standards
+
+## LETS MAKE A SOLUTION PLAN:
+
+IDENTIFY THE DATA WE NEED: Data to extract: *County* OrganizationLevel
+-\> we want "School" *TestSubject* CountMetStandard
+
+WHAT IS THE EQUATION TO BE USED? Average% Met(per county) = (Sum of
+CountMetStandard/ Sum of Count of Students Expected to Test)\* 100
+
+Ok, according to the equation, we need to
+
+1\. Group the data by county
+
+2\. Summarise countmetstandard (how many students met the standard) and
+countofstudentsexpectedtotest(eligible population (including
+non-testers))
+
+3\.
+
+## Check if our data have been read in correctly and what types of data we have
+
+```{r}
+
+Datatypelist <- WashingData %>%
+  summarise_all(class)%>%
+  pivot_longer(everything(),
+               names_to="All_variables",
+               values_to="Variable_class")
+
+Datatypelist
+
+```
+
+Ok the data we want to take out is in there!!
+
+## Select Columns We Want/ Need
+
+So now we select the columns as we know which index we want into
+WashingCounty:
+
+```{r}
+WashingCounty <- WashingData%>%
+  dplyr::select(c(County, OrganizationLevel, GradeLevel, TestSubject, CountMetStandard, Count.of.Students.Expected.to.Test))
+
+```
+
+##Clean Data, selecting only the data we want in these columns: First,
+we install package janitor -\> used to clean data!!
+
+```{r}
+install.packages("janitor")
+```
+
+```{r}
+library(janitor)
+```
+
+Clean the data into the only data we wanted to see: *County = all*
+Organization levels = only schools *GradeLevel = all* TestSubject = only
+science
+
+```{r}
+# Filter data for county-level science results, all grades only
+WashingCounty1 <- WashingCounty %>%
+  janitor::clean_names()%>%
+    dplyr::filter(county != "Multiple")%>%
+    dplyr::filter(organization_level== "School")%>%
+    dplyr::filter(grade_level=="All Grades")%>%
+    dplyr::filter(test_subject== "Science")%>%
+  
+  #you can type in the console : unique() to check!!
+  
+  
+#group the data by county -> so that summary statistics will be calculated by groups by county
+  dplyr::group_by(county)%>%
+  
+#remove all the NaN values!!
+  na.omit()
+```
+
+## Create a new column for ......
+
+```{r}
+county_percentage <- WashingCounty1 %>%
+  dplyr::summarise(
+    total_county_students_met_standard = sum(count_met_standard),
+    total_student_tested = sum(count_of_students_expected_to_test)) %>%
+  dplyr::mutate(
+    average_percentage_met_per_county = (total_county_students_met_standard / total_student_tested) * 100)
+
+#Now list them out
+county_percentage
+
+```
+
+## Find State Average - Statewide % of Science students who met standard
+
+Equation: state_average = 100\*(Sum of countmetstandard/ Sum of
+countofstudentsexpectedtotest)
+
+Therefore, state_average will be the average of the total of
+average_percentage_met_per_county
+
+Then we use the pull function to extract the value out!!
+
+```{r}
+state_average <- county_percentage %>%
+  dplyr::summarise_at(c("total_county_students_met_standard", "total_student_tested"), sum, na.rm = TRUE) %>%
+  dplyr::mutate(state_average= ((total_county_students_met_standard/ total_student_tested)*100))%>%
+  dplyr::pull(state_average)
+# pull() is used to extract a single column from a data frame/ tibble and return as vector
+# In this case, extracts the final number as a standalone numeric value
+
+```
+
+## Above or Below State Average
+
+```{r}
+county_above_or_below_state <- county_percentage %>%
+  dplyr::mutate(statediff = average_percentage_met_per_county - state_average) %>%
+  dplyr::mutate(statediff=round(statediff,0)) %>%
+  dplyr::mutate(above_below_state = dplyr::case_when(statediff<0 ~ "Below",
+                                       statediff==0 ~ "Equal",
+                                       statediff>0 ~ "Above"))
+```
+
+## Now join Spatial Data
+
+Just loading the packages again \~
+
+```{r}
+library(sf)
+library(tmap)
+library(tmaptools)
+```
+
+better to use the name : joined_data
+
+```{r}
+WashingMap <- shape%>%
+  dplyr::left_join(.,
+            county_above_or_below_state, 
+            by = c("COUNTYLABE" = "county"))
+```
+
+```{r}
+tmap_mode("view")
+
+tm_shape(WashingMap)+
+  tm_basemap(server = "OpenStreetMap")+
+  tm_polygons(
+    fill = "above_below_state",
+    fill.scale = tm_scale_categorical(values = "brewer.bu_pu"),
+    fill_alpha = 0.5,
+    fill.legend = tm_legend(title="State Average In science Performance", size = 0.8)
+    )+
+  tm_compass(type="arrow", position = c("left","bottom"))+
+  tm_scalebar(position= c("left","bottom"))+
+    tm_title("Counties Above or Below State Avearge for Science for All Grades",
+         size = 2,
+         position = c("centre","top"))
+```
