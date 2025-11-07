@@ -95,6 +95,14 @@ Starting with OSM and Airbnb data which we need for our sub figures:
 2.  Airbnb
 3.  MSOAs polygons (Middle Layer Super Output Area - used for reporting small area statistics)
 
+**Why this order:**
+
+-   **CRS first** so all spatial operations (point-in-polygon, area calculation) are accurate (meters, not degrees).
+
+-   **Filtering before joins** reduces noise and speeds up spatial joins; also ensures you’re comparing like with like (entire homes vs. hotels).
+
+**What it gives:** Methodologically fair comparison and correct geometry/area calculations for density later.
+
 ### Set CRS and Filter
 
 -   We reproject all layers to British National Grid (BNG; EPSG:27700)
@@ -178,6 +186,10 @@ UK_outline <- st_read("Week 5 Practical Data/gadm41_GBR_shp (1)/gadm41_GBR_0.shp
 
 ## 5.8. Join and Sum
 
+**Why now:** Once points are attributed to polygons, you can roll up counts, then compute **rates** and **ratios**.
+
+**What it gives:** The core comparison table: for each MSOA, how many Airbnbs vs. hotels.
+
 ### Join Data
 
 To join 2 spatial features we use - `st_join()`
@@ -258,4 +270,92 @@ Hotels_sum %>%
 
 We can use a topological relationship!!
 
-It describes how two geometries relate in space—**without caring about exact distances or coordinates**, just their **relative arrangement**. Think “do they touch, overlap, sit inside, or are they separate?”
+More can be read here: <https://postgis.net/workshops/postgis-intro/spatial_relationships.html>
+
+![](images/clipboard-1517386785.png)
+
+Topology is the arrangement of how point, line, and polygon features share geometry — how they relate in space **without caring about exact distances or coordinates**, just their **relative arrangement**. Think “do they touch, overlap, sit inside, or are they separate?”
+
+**Common ones to focus on include:\
+***Example: A = Boroughs（倫敦各區 polygon）、B = OSM Hotels（酒店 points)*
+
+-   `st_intersects(A, B)` - Do A (boroughs) touch or overlap with B (OSM).
+
+    -   Returns a list of boroughs (33 rows) and in each borough a list of hotels
+
+-   `st_contains(A, B)` - Does A (boroughs) contain B (OSM)
+
+    -   Returns a list of boroughs (33 rows) and in each borough a list of hotels
+
+-   `st_within(A, B)` - Is A (boroughs) inside B (OSM). This is asking are boroughs inside hotels
+
+    -   Returns a list of boroughs that are inside hotels, this produces a result of 0. If we flip it we get a result but it will be the length of the hotels (e.g. `st_within(OSM, Londonborough)`). Note, `st_within(A, B) == st_contains(B, A)`
+
+```{r}
+Hotels_example <-st_contains(Londonborough, OSM)
+#問每個borough完全包含哪啲酒店points
+
+Hotels_example
+```
+
+This output has resulted 33 rows (32 boroughs and 1 City of London)!!
+
+e.g. 1 is the first borough in Londonbrough and the 35, 105... are the row indices of hotel points in OSM that are contained inside that first borough!!
+
+#### The Actual Code:
+
+Now we take the length of that list per borough:
+
+```{r}
+Accomodation_contained <- Londonborough%>%
+  mutate(hotels_n = lengths(st_contains(., OSM)))%>%
+  # lengths() - turns list of indices (35, 105...) from st_contains to a numeric vector: number of hotels per borough
+  # st_contains - topological predicate that ask for each borough polygon in which points in OSM are strictly contained inside it.
+  mutate(airbnbs_n = lengths(st_contains(., Airbnbs)))
+```
+
+Now Bexley is 0 hotels not 1 !! Woohoo!!
+
+#### Check our Bexley Example
+
+It should be 0 hotels not 1!!
+
+```{r}
+# the group by and summarise data = 1 Hotel!
+Accomodation_contained %>%
+  filter(NAME=="Bexley")
+```
+
+### Key Advice
+
+Find out whether it is Point or Multipolygon?
+
+-   When you run the code to load in the data, it tells you in the **Geometry Type: ...**
+
+OK, so, when to use `st_join()` or a topological relationship??
+
+`st_join()`
+
+-   joins attributes of two spatial objects
+
+-   e.g. if I wanted to know what borough each hotel was in…the output here would be points (each hotel row now **carries the borough’s fields** (name, code, etc.) as the first dataset is point)
+
+```{r}
+Hotels2 <-  st_join(OSM, Londonborough)
+```
+
+-   It can easily join polygons or points of the same exact geometry (e.g. if i had data in two sf objects for London)
+
+```{r}
+London_data <-  st_join(London_borough_data1, London_borough_data2, join=st_equals)
+```
+
+**Topological Relationships**
+
+-   Use when you just need counts / relationships, not extra columns
+
+-   e.g. when you want to know "***How many points are in each polygon***?"
+
+-   Create counts of points in polygons but without knowing what borough each hotel is in. It returns the borough polygons with a count.
+
+## 5.9. Mapping
