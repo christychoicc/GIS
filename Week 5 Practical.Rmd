@@ -1,0 +1,195 @@
+---
+title: "week_5_practical"
+output: html_document
+---
+
+# Chapter 5 - Map Making
+
+Practical: Compare Airbnbs and Hotels across London Boroughs
+
+## Clear Memory First !!
+
+```{r}
+rm(list = ls()) #removes all objects from workspace 
+gc() #clear memory
+```
+
+## 5.5. Download Data
+
+1.  OSM
+
+    Go to the Geofabrik download server [website](http://download.geofabrik.de/) \> Europe \> United Kingdom \> England \> Greater London \> Download greater-london-latest-free.shp.zip
+
+2.  London Boroughs
+
+    To get the data go to [the London data store](https://data.london.gov.uk/) \> Search Statistical GIS Boundary Files For London \> Download statistical-gis-boundaries-london.zip
+
+3.  World Cities
+
+    Download them from the [ArcGIS HUB](https://hub.arcgis.com/datasets/6996f03a1b364dbab4008d99380370ed_0) \> Download \> Shapefile
+
+4.  UK Outline
+
+    Download [GADM data for the UK](https://gadm.org/download_country.html)
+
+5.  Airbnb
+
+    Download the `listings.csv` from the [inside airbnb website](http://insideairbnb.com/get-the-data.html) for London.
+
+## 5.6. Plan
+
+First, always have a clear aim, draw out what we want our final map to look like!!
+
+Reminder: the task is to ***"Compare Airbnbs and Hotels across London Boroughs"***
+
+This practical selected boroughs for ease and to show certain concepts:
+
+-   Boroughs are **not** a good spatial unit for this
+
+    -   Boroughs vary hugely in size and populations, so aggregate counts may mislead
+
+    -   e.g. Big/ busy boroughs will always look like they have "more" even if they are not actually more intense
+
+-   Should **never** use count data for mapping!!
+
+    -   Never colour a map with raw totals (just the count) as big/ busy places naturally have bigger totals, looking "more intense" when they are not !!
+
+Ok, so, the plan will be something like this...
+
+![](images/clipboard-1445683016.png)
+
+### Steps of the Plan
+
+1.  Conceptually, think of each section as a separate object, e.g. Hotels will be a London Borough 'sf' object that has a column of Hotels
+2.  Wrangle our data to get to that point
+    1.  Downloading data
+        1.  Hotels and Airbnb Figures
+            -   London borough MSOAs (shp)
+
+            -   Airbnbs (csv)
+
+            -   Hotels (shp)
+        2.  Study Area Map
+            -   Outline of the UK (shp)
+
+            -   UK Cities (shp)
+    2.  Setting the CRS and Filtering
+        -   Our CRS for the Boroughs needs to be British national grid (BNG)
+
+        -   Filter hotels from the OSM data
+
+        -   Filter equivalent airbnbs (e.g. room_type == ‘Entire home/apt’ & availability_365 ==‘365’)
+    3.  Joining and Summing Data
+        -   Join the Airbnbs to the MSOAs and sum (i.e. how many are in each MSOA)
+
+        -   Join the Hotels to the MSOAs and sum
+    4.  Making Some Maps
+
+## 5.7. CRS and Filter
+
+We have downloaded the data already so we move on to 2. Setting the CRS and Filtering.
+
+Starting with OSM and Airbnb data which we need for our sub figures:
+
+1.  OSM
+2.  Airbnb
+3.  MSOAs polygons (Middle Layer Super Output Area - used for reporting small area statistics)
+
+### Set CRS and Filter
+
+-   We reproject all layers to British National Grid (BNG; EPSG:27700)
+
+    -   Do this first, so that all spatial operations are accurate!!
+
+    -   27700, the BNG, good for UK work and for accurate distances/ areas in meters
+
+-   Filter hotels from OSM
+
+-   Filter Airbnbs to a comparable subset
+
+### OSM Data:
+
+```{r}
+library(sf) 
+library(tidyverse)  
+
+# OSM data   
+
+OSM <- st_read("greater-london-251105-free.shp (1)/gis_osm_pois_free_1.shp")%>%   st_transform(., 27700) %>%   #select hotels only   
+  filter(fclass =='hotel')
+```
+
+### Airbnb Data:
+
+```{r}
+# Airbnb Data  
+
+Airbnb <- read_csv("listings (4).csv") %>%
+  # longitude is considered x value here, latitude is y
+  # this step we turn a plain table into a spatial object!! 
+  st_as_sf(., coords = c("longitude", "latitude"), 
+                   crs = 4326) %>%
+                  # crs=4326 tells R what coordinate systems those numbers r in
+    st_transform(., 27700)%>%
+    #reproject to a different CRS
+    #select entire places that are available all year
+    filter(room_type == 'Entire home/apt' & availability_365 =='365')
+
+```
+
+## London Borough:
+
+```{r}
+#London Borough data is already in 277000
+Londonborough <- st_read("statistical-gis-boundaries-london (2)/statistical-gis-boundaries-london/ESRI/London_Borough_Excluding_MHW.shp")%>%
+  st_transform(., 27700)
+```
+
+### World Cities Data:
+
+-   Filtering Birmingham, London, Edinburgh
+
+-   An Outline of the UK
+
+```{r}
+# Load World Cities 
+Worldcities <- st_read("World_Cities (2)/World_Cities.shp") %>%   
+  st_transform(., 27700)
+```
+
+```{r}
+# Filter based on key cities (Birmingham, London, Edinburgh) 
+Worldcities2 <- Worldcities %>%   
+  filter(CNTRY_NAME == 'United Kingdom'&            # take only rows that has United Kingdom in CNTRY_NAME column            
+           Worldcities$CITY_NAME == 'Birmingham'|            
+           Worldcities$CITY_NAME == 'London'|            
+           Worldcities$CITY_NAME == 'Edinburgh')           
+          # meaning in Worldcities, reach CITY_NAME for the key cities   
+
+
+# Load UK Outline and transform 227700 
+UK_outline <- st_read("gadm41_GBR_shp (1)/gadm41_GBR_0.shp") %>%   
+  st_transform(., 27700)
+```
+
+## 5.8. Join and Sum
+
+To join 2 spatial features we use - `st_join()`
+
+The output will be a large dataset where:
+
+-   Each hotel will be a new row
+
+-   It will retain the attributes of the hotel data but also append the attribute of the borough
+
+-   `st_join()` defaults to a left join, so in this case the borough data is the left dataset and all the right data has been appended to it. If the left data (borough) had no matches (so no hotels) they would still appear in the final dataset. The default argument for this is `st_intersects` but we will explore this more next week.
+
+Ok, let's do the join!!
+
+```{r}
+Hotels <- st_join(Londonborough, OSM)
+
+Airbnbs <- st_join(Londonborough, Airbnb)
+
+head(Hotels)
+```
