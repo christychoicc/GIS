@@ -1,0 +1,156 @@
+---
+title: "Week4HomeworkAttempt2"
+author: "Christy Choi"
+date: "2025-10-26"
+output: html_document
+---
+
+# Exam
+
+The task this week is to:
+
+-   Read in [global gender inequality data](https://hdr.undp.org/data-center/documentation-and-downloads)
+
+-   Join the global gender inequality index to [spatial data of the World](https://hub.arcgis.com/datasets/2b93b06dc0dc4e809d3c8db5cb96ba69_0/explore?location=-2.688200%2C0.000000%2C1.41), creating a new column of difference in inequality between 2010 and 2019. **Note** this download has become temperamental but the .geojson should work. Andy will provide the data if not.
+
+-   Share it with the World on GitHub
+
+-   Add you repository URL to the circulated spreadsheet
+
+**Tip** the [countrycode R package](https://github.com/vincentarelbundock/countrycode) will be helpful!
+
+**Tip** the gender inequality has changed in the last year, you will find what you need in the “All composite indices and components time series (1990-2021)” dataset, the metadata file beneath it will explain what the columns are.
+
+## Plan:
+
+1.  Read in Gender Inequality Index (GII)
+2.  Read in World Countries Spatial Layer
+3.  Clean and match country identifiers (Use countrycode package)
+4.  Join GII with World and compute changes between 2010 and 2019
+
+## Clear Memory First!!
+
+```{r}
+rm(list = ls()) #removes all objects from workspace
+gc() #clear memory
+```
+
+## Install Packages
+
+```{r}
+library(sf)
+library(readr)
+library(here)
+library(tidyverse)
+library(janitor)
+library(ggplot2)
+library(countrycode)
+```
+
+## Read in GII Data
+
+```{r}
+GIIdata <- read_csv(
+  "HDR25_Composite_indices_complete_time_series (1).csv")
+print(GIIdata)
+```
+
+## Read in GeoJSON
+
+```{r}
+WorldCities <- st_read(
+  here::here("Week 4 Homework Attempt 2",
+  "World_Countries_(Generalized)_9029012925078512962 (1).geojson"))
+```
+
+## Clean Data and Create a New Column of Difference in Inequality between 2010 and 2019
+
+1.  Clean Names
+2.  Select columns we want
+3.  Mutate a new column for calculated difference
+4.  Mutate a new column for turning country names into ISO2 (using countrycode())
+5.  Mutate a new column for turning ISO3 into ISO2 (using countrycode())
+
+country.names -\> tells countrycode() what type of data is inside the column which in our case it is full country names.
+
+```{r}
+GIIcols <- GIIdata %>%
+  clean_names() %>%
+  select(iso3, country, gii_2019, gii_2010) %>%
+  mutate(difference=gii_2019-gii_2010) %>%
+  #next, add a new column called iso_code
+  #using countrycode function to convert full country names (country.name) into ISO 2-letter codes (iso2c) e.g. Germany -> DE
+  mutate(iso_code=countrycode(country, origin = 'country.name', 
+                              destination = 'iso2c')) %>%
+  mutate(iso_code2=countrycode(iso3, origin = 'iso3c', 
+                               destination = 'iso2c'))
+  #add another column called iso_code2
+  #convert ISO 3 letter codes into ISO 2 letter codes e.g. DEU -> DE
+
+```
+
+## Join Data (using left-join)
+
+Join the CSV file to GeoJSON file (using the common link ISO2 country code)
+
+Left Join here:
+
+-   Keeps all rows from the left data set (WorldCities)
+
+-   and add matching rows from the right data set (GIIcols)
+
+```{r}
+#251
+Join_GII <- WorldCities %>%
+  clean_names() %>%
+  left_join(.,               # . the dot refers to the WorldCities data
+            GIIcols,         # the second data set we are joining
+            # this joins the two ISO2 together
+            by = c("iso" = "iso_code"))
+            # last line specifies the join key
+            # iso is a column in WorldCities
+            # iso_code is a column in GIIcols
+            # so here it means WorldCities$iso = GIIcols$iso_code
+```
+
+\*note: aff_iso refers to affiliate country, a **territory or region that is politically or administratively linked to another country**, often used in datasets where smaller regions don’t have their own independent data.
+
+\*our join above using iso=iso_code will join based on each country's own ISO2 code, e.g. Aruba has an ISO of "AW" but no GII data for "AW" it will return as a NA, in this case the countries of Aruba will be unmatched.
+
+Therefore, to get a more complete coverage we can:
+
+```{r}
+#261 
+#but my data GIIcols does not have an aff_iso column, so this section will not work as expected to have a match count of 261, but here is just for reference!!
+Join_GII_2 <- WorldCities %>%
+  clean_names() %>%
+  left_join(., 
+            GIIcols, 
+            by = c("aff_iso" = "iso_code"))
+```
+
+## Problems
+
+With Join_HDI (that uses country name to join) the entries for other islands aren't joined as they don't have the same name...for example, Anguilla, Bermuda, Falkland Islands.....
+
+These are The British Overseas Territories (BOTs), also known as the United Kingdom Overseas Territories (UKOTs), fourteen territories with a constitutional and historical link with the United Kingdom, but do not form part of the United Kingdom itself.
+
+Should the HDI value for the UK be assigned to the The British Overseas Territories ?
+
+-   These territories do not have their own GII data
+
+-   Using the joined datasets Join_GII and Join_GII_2
+
+-   Select only the rows where aff_iso code is "GB" (United Kingdom)
+
+    -   Which this gives you all the territories linked to the UK
+
+-   Now Join_GII GB and Join_GII_2_GB will give subsets of data that represents British Overseas Territories!!
+
+```{r}
+Join_GII_GB<-Join_GII %>%
+  filter(aff_iso=="GB")
+
+Join_GII_2_GB<-Join_GII_2 %>%
+  filter(aff_iso=="GB")
+```
