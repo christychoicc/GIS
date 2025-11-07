@@ -1,0 +1,156 @@
+---
+title: "Week 2 Practical_ Mapping"
+output: html_document
+date: "2025-10-13"
+---
+## 2.5.8. Spatial Data in R
+
+Load the packages we installed
+
+```{r}
+
+library(tmap)
+library(tmaptools)
+library(sf)
+
+```
+
+## 2.5.8.2. Making Choroplethmaps
+
+Load the file
+REMEMBER: THE WHOLE SHAPEFILE FOLDER MUST BE ADDED IN BEFORE YOU TYPE THE FILE NAME FOR THE .SHP FILE!!!
+EW -> the name of an object you created to store spatial data from a shapefile, holds geometries, - includes attributes (like borough names, codes, population, etc.),  ready for mapping, filtering, and analysis
+
+
+```{r}
+
+EW <- sf::st_read("C:\\Users\\choic\\OneDrive\\CASA\\GIS\\prac2\\LAD_Dec_2015_FCB_GB_2022_-1836983239597816196\\LAD_Dec_2015_FCB_GB.shp")
+
+```
+## Checking if things are present in my data
+
+To double check if I am doing the right thing,
+I checked if London Map is an sf object and EW have loaded sucessfully, 
+and if lad15cd exist in EW
+
+```{r}
+library(stringr)
+```
+```{r}
+class(EW)
+names(EW)
+```
+Look for the bit of the district code that relates to London (E09) from the 'lad15cd' column data frame of our sf object
+
+```{r}
+LondonMap <- EW%>%
+  dplyr::filter(stringr::str_detect(lad15cd,"^E09"))
+```
+
+## Plot the map using qtm function
+qtm() ->  "quick thematic map" function from the tmap package designed to give you a fast, automatic visualization of your spatial data.
+```{r}
+qtm(LondonMap)
+```
+
+## 2.5.8.3. Attribute Data
+
+Before creating a map,
+join some attribute data with some boundaries using merge()
+
+First, we clean up all our names with Janitor again:
+```{r}
+LondonDataOSK <- janitor::clean_names(LondonDataOSK)
+#EW is the data we read in straight from the web
+
+BoroughDataMap <- EW%>%
+  janitor::clean_names()%>%
+  #the . here means usingh the data that is already loaded
+  dplyr::filter(stringr::str_detect(lad15cd, "^E09"))%>%
+  merge(.,
+        LondonDataOSK,
+        by.x="lad15cd",
+        by.y="new_code",
+        no.dups = TRUE)%>%
+  dplyr::distinct(.,lad15cd,
+           .keep_all = TRUE)
+```
+in the above, 
+We added distinct() meaning that we only have unique rows based on the code, while keeping other variables .keep_all = TRUE
+~ if .keep_all = FALSE -> this will remove all other variables (attributes in the columns)
+
+Alternatively (for merge())
+You can use a join type,
+merge() = default = inner join
+~~ we usually use a left join!!
+```{r}
+library(tmap)
+library(tmaptools)
+```
+
+```{r}
+tmap_mode("plot")
+qtm(BoroughDataMap,
+    fill = "rate_of_job_seekers_allowance_jsa_claimants_2015")
+```
+Adding a basemap for a static map
+
+```{r}
+
+```
+```{r}
+
+```
+
+After installing the packages, we can now code the functions to work: 
+
+Breakdown: 
+st_bbox(.) ->- extracts the bounding box (xmin, ymin, xmax, ymax) of your spatial object.
+        . -> - refers to BoroughDataMap passed from the pipe.
+        
+tmaptools::read_osm(...) -> - downloads a basemap image from OpenStreetMap
+
+in read_osm(., ......) the first . means use the result from previous pipe step
+
+type = "esri" -> uses ESRI's tile server for clean basemap style
+
+zoom = NULL -> lets the function auto-select the zoom level based on the bounding box size
+
+```{r}
+tmaplondon <- BoroughDataMap %>%
+  st_bbox(.)%>%
+  tmaptools::read_osm(., type = "esri", zoom = NULL)
+
+```
+In the above,
+the basemap is now set,now to plot:
+add the basemap
+add the shape
+tell it which attribute to map (job seekers here)
+tell it the style to make the colour divisions, transparency(alpha), compass, scale and legend
+
+style -> how to divide the data into out colour breaks
+values -> the colour scheme to use
+
+```{r}
+tmap_mode("plot")
+
+tm_shape(tmaplondon)+
+  #add basemap as Red Green Blue raster
+  tm_rgb()+
+  #add sf data
+  tm_shape(BoroughDataMap)+
+  #add polygon layer
+  tm_polygons(fill = "rate_of_job_seekers_allowance_jsa_claimants_2015",
+              fill.scale = tm_scale_intervals(values="brewer.bu_pu",
+                                              style="jenks"),
+              fill_alpha = 0.5,
+              fill.legend = tm_legend(title="rate of claimants 2015",
+                                      size = 0.8))+
+  tm_compass(type = "arrow", position=c("left", "bottom"))+
+  tm_scalebar(position =c("left","bottom"))+
+  tm_title("Job seekers' Allowance Claimants",
+           size = 2,
+           position = c("centre", "top"))
+```
+
