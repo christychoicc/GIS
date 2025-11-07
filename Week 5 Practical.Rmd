@@ -359,3 +359,490 @@ London_data <-  st_join(London_borough_data1, London_borough_data2, join=st_equa
 -   Create counts of points in polygons but without knowing what borough each hotel is in. It returns the borough polygons with a count.
 
 ## 5.9. Mapping
+
+Tmap
+
+-   Purpose-built for maps
+
+-   It is now upgraded to version 4 in 2025!! With more features
+
+When installing tmap, make sure to install the development version:
+
+More on: <https://github.com/r-tmap/tmap>
+
+```{r}
+remotes::install_github("r-tmap/tmap", force=TRUE)
+```
+
+`tmap` works on the principle of:
+
+-   loading your shape object with `tm_shape()` (here `sf` object, but it could be a raster)
+
+-   setting the map layer (e.g. polygons (`tm_polygons()`), symbols (`tm_symbols()`),raster (`tm_raster()`), text (`tm_text()`), lines (`tm_lines()`) etc).
+
+-   applying a derived function (e.g. border (`tm_borders()`), fill (`tm_fill()`), markers (`tm_markers()`).
+
+### Hotel Mapping
+
+```{r}
+library(tmap)
+
+# change to "view" for an interactive map
+tmap_mode("plot")
+```
+
+```{r}
+# set the shape
+tm <- tm_shape(Accomodation_contained) +
+  # set the map layer
+  # try changing this to tm_symbols()
+  tm_polygons("hotels_n",
+              col = "black", lwd=0.5, lty="dashed",)
+
+# plot the map
+tm
+```
+
+### Mapping with NO Spatial Data (Outline only)
+
+Just want the map with no spatial data will look like:
+
+```{r}
+tm_no_map_layer <- tm_shape(Accomodation_contained) + 
+  # there is no tm_polygons() if we just want the map with no spatial data
+  tm_borders(col = "darkblue")
+
+tm_no_map_layer
+```
+
+### Add More Information to Map (Violin Plot): 
+
+In the code below we have:
+
+-   `tm_scale_intervals()` - used for numerical data
+
+-   `values` - the values to use to style the map, here it’s blue from the colour brewer list. There are a number of options here. See the next code chunk.
+
+-   `n` - the number of breaks to have
+
+-   `style` - how to decide where to make the breaks. We have a lot of choice for this. See the [interval scale reference](https://r-tmap.github.io/tmap/reference/tm_scale_intervals.html). Jenks looks for the *natural breaks* in the data and is often used.
+
+-   `fill_chart()` produces a summary of the mapped data with a violin plot, there are many options see the [tmap chart vigette](https://r-tmap.github.io/tmap/articles/basics_charts)
+
+```{r}
+tmap_mode("plot")
+```
+
+```{r}
+# plot each map
+tm1 <- tm_shape(Accomodation_contained) + 
+  tm_polygons(fill ="hotels_n",
+              col = "black", 
+              lwd =0.5,
+              lty="dashed",
+              # above this was the same as before
+              fill.chart = tm_chart_violin(),
+              fill.scale = tm_scale_intervals(
+                values="hcl.cold",
+                n=5, #number of intervals (5 intervals and we see 5 colours in this case)
+                style="jenks"))
+
+tm1
+```
+
+### For more colour options
+
+You can find an appropriate colour scheme and use the `name` in the `values` argument in the code above (replacing `brewer.bu_pu`)
+
+First time using, so I need ti install the following code first:
+
+```{r}
+install.packages(c("shinyjs", "kableExtra", "colorblindcheck"))
+```
+
+#### Colour Options - Run To Check the Colour Palette: 
+
+It will pop a new window for a page with colour palette choices!!
+
+```{r}
+library(colorblindcheck)
+cols4all::c4a_gui()
+```
+
+### Complete Map
+
+Before continuing,
+
+We need to set up our breaks to be consistent across the 2 datasets, as otherwise our maps will not be comparable!!
+
+Breaks - **“breaks”** are the **cut-points** that split your numeric data into color **classes** (bins). For example, if you choose 5 classes, you need 6 break values to define the class boundaries (e.g., 0–5, 5–10, 10–20, 20–40, 40–80).
+
+Why Breaks Important?
+
+Comparing **two maps side-by-side** (Airbnbs vs Hotels), and each map auto-picks its own breaks, the **same color** can represent **different value ranges** on each map. That makes visual comparison **misleading**.
+
+*Example: Borough counts for Hotels 0-25, Airbnbs 0-70 (wider range), we can pick 5 classes over 0-70 and use same breaks and palette for both maps -\> which now the darkest colour always = top class 50-70 on both maps!!*
+
+-    Inconsistent breaks → “dark purple” on the Airbnb map might mean **≥ 40**, while “dark purple” on the Hotel map might mean **≥ 20**. You’d think Airbnb is more intense, but you’re not comparing like with like.
+
+-    Consistent breaks → the same colors correspond to the **same numeric ranges** on both maps, so you can compare at a glance.
+
+#### Follow the Steps before Finishing the Map:
+
+1.  Check which dataset has the greatest range:
+
+    Check which of the two variables (e.g., `hotels_n` vs `airbnbs_n`) spans **wider values** (min→max). Use that to define one set of breaks that **covers both** datasets. Then **apply the same breaks** to both maps.
+
+```{r}
+stats <- Accomodation_contained %>%
+  st_drop_geometry() %>%
+  #Convert spatial data to non-spatial data
+  dplyr::select(hotels_n, airbnbs_n) %>%
+  #Keeps only the two numeric columns you want to summarise
+  #next
+  #summarise(...) - collaspe data down to one row summary by computing summary values you define
+  #across(...) - apply same set of functions to selected columns
+  #everything() - select all columns currently in the data
+  #list(...) - set of functions to run on each selected column with names for the outputs
+  summarise(across(everything(), list(
+    min = min,
+    max = max,
+    mean = mean,
+    median = median,
+    sd = sd
+  )))
+```
+
+2.  From the stats tibble, we found out Airbnb has the greatest range!
+
+    So we will use that to generate our breaks and apply to both datasets!!
+
+```{r}
+library(classInt)
+```
+
+```{r}
+# Get Jenks breaks for 5 classes
+breaks <- Accomodation_contained%>%
+  st_drop_geometry()%>%
+  #need a numeric vector not a dataframe or tibble
+  pull(airbnbs_n) %>% 
+  #extract airbnbs_n column from into a numeric vector
+  classIntervals(., n = 5, style = "jenks")
+  #from classInt package, computes class boundaries (breaks) for mapping
+  #we want 5 classes - n=5
+  #use style="jenks" -> Jenks natural breaks
+  
+breaks$brks
+#Extracts the vector of break values from the result
+#$ -> extract brks from breaks
+#brks -> an abbreviation for "breaks"
+```
+
+3.  Make Maps for Hotels and Airbnbs (as planned)
+
+Because we have our data of interest in two separate we have a few options:
+
+1.  Make a `tmap` object for each dataset (i.e. the same as above but now for airbnb)
+
+2.  Use a facet map - this allows small maps for each group (here the group is airbnb or hotel)
+
+Let’s set up the facets...
+
+```{r}
+tm1 <- tm_shape(Accomodation_contained) +
+    tm_polygons(
+      fill = c("hotels_n", "airbnbs_n"),
+      #tell tmap to map 2 variables: hotel and airbnb
+      fill.scale = tm_scale_intervals(values = "brewer.blues", breaks=breaks$brks),
+      # set the legend
+      fill.legend = tm_legend(title="Accomodation count",
+                              title.size=0.85,
+                              size=0.8,
+                              # plot outside of the main map
+                              #explained below
+                              position=tm_pos_out("right", 
+                                                  "center",
+                                                  pos.v = "center")),
+      # all facets share the same legend, fill.free = FALSE -> means do not give each facet its own scale/legend
+      fill.free = FALSE)+
+  # make 2 rows for the facets (so one on top of the other)
+  tm_facets(nrow=2)
+  # if want side by side jau use ncol=2
+
+tm1
+```
+
+Set the position of the legend to be outside the main plot `tm_pos_out()` the arguments that follow set where to place the legend:
+
+-   right = in the area to the right side of the plot (each map is a 3x3 grid or possible area)
+
+-   center = in the center [adjusted to the center] of the right “column”
+
+-   `pos.v = "center"` = in the middle of the column (not top of bottom)
+
+The vertical (`pos.v`) and horizontal (`pos.h`) positions can also be set numerically where in relation to the top left hand corner of the object you are placing.
+
+0 = left (`pos.h`) or bottom (`pos.v`) 1 = right (`pos.h`) or top (`pos.v`)
+
+**Why didn't we include a chart here?**
+
+If we include a chart here it will combine the data into a single plot. So we could either:
+
+-   separate out our facets into individual tmap objects with a chart
+
+-   make separate charts with ggplot2 and add them onto the map as objects later.
+
+#### **Continue the Map:**
+
+-   Change the labels (`tm_layout()`)
+
+-   Add a compass (`tm_compass()`)
+
+-   Add a scalebar (`tm_scalebar()`)
+
+-   Add a credit to OSM/Airbnb (`tm_credits()`)
+
+```{r}
+# change headings or remove
+
+tm2 <- tm1+
+  # reminder* tm1 is first facet: hotels, second: airbnbs
+  tm_layout(panel.labels=c("Hotels", "Airbnb"),
+            #set facet titles for the two maps of tm1 above
+            panel.show = TRUE,
+            #showed those 2 facet headers
+            panel.label.bg.color = "transparent",
+            #setting the header fill transparent is optional!!
+            )+
+  
+  tm_compass(type= "arrow", #add a north sign
+            size=1.8,
+            position = tm_pos_out("right", #right side of map
+                                  "center", #align to center
+                                  pos.h= -0.05, #go a bit left
+                                  pos.v =0.72))+ #go a bit up
+  tm_scalebar(text.size = 0.7,
+              width=10,
+              breaks=c(0,10,20), #tick labels at 0, 10, 20 (km) on the bar
+              position = tm_pos_out("right",
+                                    "center", 
+                                    pos.h=0.075,
+                                    pos.v = 0.68))+
+  # we could use tm_credits to place sub-titles like (A) or (B)
+  # on the map.
+  tm_credits("(c) OpenStreetMap contrbutors and Airbnb",
+             size=0.6,
+             position = tm_pos_out("center",
+                                   "bottom",
+                                   pos.v = 1.5,
+                                   pos.h=-0.02))
+
+tm2
+```
+
+#### Save (Download) the Map!!
+
+```{r}
+tmap_save(tm2, "Week 5 Practical Data/1_facet.png", width = 8, height = 6, units="in", dpi = 300)
+```
+
+### Study Area (Crop UK + Location Points for 3 Key Cities)
+
+Add an "inset" map for our study area - Just a map on our map
+
+We do a quick thematic map ( qtm() ) of our study outline
+
+In Andy's practical - we see that Scottish islands make it appear off centre, so we will need to use a bounding box to clip (cookie cutter) or shape
+
+```{r}
+qtm(UK_outline)
+```
+
+The coordinates below are found in: bboxfinder.com
+
+```{r}
+newbb <- c(xmin=-318490.1023, ymin=26818.3535,xmax=638132.4435,ymax=1236710.3934)
+
+UK_outlinecrop <- UK_outline$geometry %>%
+  st_crop(.,newbb)
+```
+
+To add layers to an individual map, we add another geometry, here we have out UK outline (tm_polygons) then add our cities (tm_symbols) on top of the polygons
+
+```{r}
+tm3 <- tm_shape(UK_outlinecrop)+ 
+  #using the cropped box map above
+  tm_polygons(col="darkslategray1")+
+  #draws the polygon from the cropped box map(UK_outlinecrop)
+    tm_layout(frame=FALSE)+
+    #frame=FALSE -> removes the map frame/box so the map looks cleaner
+  tm_shape(Worldcities2) +
+  #reminder* Worldcities2 are filtered Birmingham, London, Edinburgh
+    #adds the city points
+    tm_symbols(shape=20,
+               fill = "orange",
+               #outline colour
+               col="black",
+               size=0.8)+
+        #add the city labels, x and y move the label around the point
+    tm_text("CITY_NAME", xmod=-1, ymod=-0.5)
+
+
+tm3
+```
+
+We can also add a visual grey bounding box to our study area map, because we are creating a tiny study-area locator to **show exactly where London is** on that UK map: a UK map with a clear box around the London area.
+
+This is optional…
+
+```{r}
+
+# build a London bounding box
+# st_bbox extracts/give the bounding x and y coordinates 
+Londonbb <- st_bbox(Accomodation_contained,
+                    crs = st_crs(Accomodation_contained))%>%
+# st_as_sfc coverts the coordinates to an sf object
+  st_as_sfc()
+
+
+# overlay that box on existing UK map
+# reminder* tm3 is the previous built UK locator map
+tm4 <- tm3 +
+  tm_shape(Londonbb)+ 
+  # add a new layer : bounding box polygon just created 
+  tm_borders(col = "grey40", lwd = 3)+
+  # draw only outline of the rectangle
+    tm_layout(frame=FALSE,
+              #no plot frame around the whole map
+            bg.color = "transparent")
+```
+
+#### Add the Study Area Grey Map to tm2 (Hotels Airbnb) Map
+
+We can arrange our maps with a number of tools:
+
+1.  `tmap_arrange()` this is fairly simple but doesn’t give much control over **placement** (e.g. `tmap_arrange(tm1, tm2)`)
+
+We will focus on:
+
+2.  `tm_inset()` function. However, at the moment `tm_inset()` does not work with a tmap object. Instead we can take an image of our inset map with `tm_grob()` but we have a little less control with placement. See
+
+```{r}
+inset <- tmap_grob(tm4, asp=1.1)
+#tmap_grob -> Renders a tmap object (here tm4, your UK locator with the London bbox) into a grob (graphical object) that can be placed inside another plot.
+#asp=1.1 -> Sets the aspect ratio (height/width). >1 makes it a bit taller relative to width; tweak to stop the inset looking squashed or stretched.
+
+final_map<- tm2+
+  #using tm2 map
+  #tm_inset(inset, ...) -> adds the locator map (the grob you created) on top of your main map as an inset.
+  tm_inset(inset,
+             position = tm_pos_out("right", "center"))
+tmap_save(final_map, "Week 5 Practical Data/2_facet.png", width = 8, height = 6, units="in", dpi = 300)
+```
+
+3.  the `grid` package. Again, can be used in a simple way but also permits re-location of the objects. However, once we use the `grid` package we can’t export through tmap (e.g. `tmap_save(tm, filename = "mymap.png"`)
+
+#### Adding one more element: the Violin Plot!!
+
+```{r}
+library(ggplot2)
+
+accom_long <- Accomodation_contained %>%
+  # drop geometry for plotting
+  st_drop_geometry() %>%  
+  pivot_longer(
+    cols = c(hotels_n, airbnbs_n),
+    names_to = "accom_type",
+    #the column name that will store the original column names
+    values_to = "count"
+    #the column name that will store the numeric values from those two columns
+  )
+```
+
+Next we use that object (`accom_long`) to make the plot
+
+```{r}
+
+#create a ggplot
+violin <- accom_long %>%
+  ggplot(aes(x = accom_type, # groups the violins (one violin per type)
+             # number
+             y = count, 
+             # hotels or airbnb 
+             fill = accom_type)) +
+             # fill colour by group 
+             # so the two violins have different fills
+  
+  #Draw violin plots to show the distribution of count for each accom_type.
+  geom_violin(trim = FALSE,
+              # trim = FALSE -> Keep the full smoothed tails of the density, even if they extend slightly beyond your observed min/max. SO, we see a full KDE curve not truncated (shortened by cutting off the end (截短的))
+              color = "grey30", 
+              alpha = 0.8) +
+  scale_fill_brewer(palette = "Pastel1") +
+  labs(  # labs() -> sets titles/labels.
+    title = "",
+    x = "",
+    y = "",
+    fill = "black"
+  ) +
+  # Rename the labels from the column names to..
+scale_x_discrete(labels = c("hotels_n" = "Hotels", 
+                            "airbnbs_n" = "Airbnbs"))+
+  # Apply a clean minmal theme with base text size of 13
+  theme_minimal(base_size = 13)+
+  theme(
+    # no legend
+    legend.position = "none",
+    # all text to black
+    text = element_text(color = "black"),         # set all text to black
+    axis.text = element_text(color = "black"),    # axis tick labels
+    axis.title = element_text(color = "black"),   # axis titles (if used)
+    plot.title = element_text(color = "black")    # title (if used)
+  )
+```
+
+Here is the grid package, we:
+
+-   plot our map (`tm2`)
+
+-   then “print” over the study area map and violin plot with the x and y controlling placement on the page.
+
+-   save the plot by
+
+```{r}
+library(grid)
+
+# Open PNG device
+png("Week 5 Practical Data/3_facet.png", width = 8, height = 6, units="in", res = 300)
+
+tm2
+print(tm4, vp = viewport(x=0.68, y= 0.25, width = 0.3, height = 0.35))
+print(violin, vp = viewport(x=0.67, y= 0.83, width = 0.25, height = 0.35))
+
+
+# Close device
+dev.off()
+```
+
+## Bad maps
+
+Things to avoid:
+
+-   Poor labeling — don’t present something as an output with the file name (e.g. layer_1_osm) in the legend — name your layers properly, it’s **really easy** to do and makes a **big** difference to the quality of the map.
+
+-   No legend
+
+-   Screenshot of the map — export it properly, we’ve been doing this a while and can tell
+
+-   Change the values in the legend … what is aesthetically more pleasing 31.99999 or 32?. Make it as easy as possible to interpret your map.
+
+-   Too much data presented on one map — be selective or plot multiple maps
+
+-   Presented data is too small or too big — be critical about what you produce, it should be easy to read and understand
+
+-   A map or figure without enough detail — **A reader should be able to understand a map or figure using the graphic in the figure/map and the caption alone!** A long caption is **fine** assuming it’s all relevant information.
+
+For more cartography ideas/advice have a look at [Katie Jolly’s blog post on urban heat islands](https://www.katiejolly.io/blog/2019-08-28/nyt-urban-heat), consult [axis map catography guide](https://www.axismaps.com/guide/) and check out the [data is beautiful reddit](https://www.reddit.com/r/dataisbeautiful/).
+
+Another decent resource is the [Fundamentals of Data Visualization book](https://serialmentor.com/dataviz/)
