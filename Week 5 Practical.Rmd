@@ -40,7 +40,7 @@ gc() #clear memory
 
 First, always have a clear aim, draw out what we want our final map to look like!!
 
-Reminder: the task is to ***"Compare Airbnbs and Hotels across London Boroughs"***
+Reminder: the task is to ***"Compare the Spatial Patterns of Airbnbs and Hotels across London Boroughs"***
 
 This practical selected boroughs for ease and to show certain concepts:
 
@@ -109,13 +109,15 @@ Starting with OSM and Airbnb data which we need for our sub figures:
 
 ### OSM Data:
 
+Geofabrik (one of these websites) allows you to download frequently updated shapefiles for various global subdivisions.
+
 ```{r}
 library(sf) 
 library(tidyverse)  
 
 # OSM data   
 
-OSM <- st_read("greater-london-251105-free.shp (1)/gis_osm_pois_free_1.shp")%>%   st_transform(., 27700) %>%   #select hotels only   
+OSM <- st_read("Week 5 Practical Data/greater-london-251105-free.shp (1)/gis_osm_pois_free_1.shp")%>%   st_transform(., 27700) %>%   #select hotels only   
   filter(fclass =='hotel')
 ```
 
@@ -124,7 +126,7 @@ OSM <- st_read("greater-london-251105-free.shp (1)/gis_osm_pois_free_1.shp")%>% 
 ```{r}
 # Airbnb Data  
 
-Airbnb <- read_csv("listings (4).csv") %>%
+Airbnb <- read_csv("Week 5 Practical Data/listings (4).csv") %>%
   # longitude is considered x value here, latitude is y
   # this step we turn a plain table into a spatial object!! 
   st_as_sf(., coords = c("longitude", "latitude"), 
@@ -137,15 +139,17 @@ Airbnb <- read_csv("listings (4).csv") %>%
 
 ```
 
-## London Borough:
+### MSOA London Borough (polygons):
+
+The MSOA shapefiles are for actual analysis - the polygons we will join our points to an aggregate within!!
 
 ```{r}
 #London Borough data is already in 277000
-Londonborough <- st_read("statistical-gis-boundaries-london (2)/statistical-gis-boundaries-london/ESRI/London_Borough_Excluding_MHW.shp")%>%
+Londonborough <- st_read("Week 5 Practical Data/statistical-gis-boundaries-london (2)/statistical-gis-boundaries-london/ESRI/London_Borough_Excluding_MHW.shp")%>%
   st_transform(., 27700)
 ```
 
-### World Cities Data:
+### World Cities Data (points):
 
 -   Filtering Birmingham, London, Edinburgh
 
@@ -153,7 +157,7 @@ Londonborough <- st_read("statistical-gis-boundaries-london (2)/statistical-gis-
 
 ```{r}
 # Load World Cities 
-Worldcities <- st_read("World_Cities (2)/World_Cities.shp") %>%   
+Worldcities <- st_read("Week 5 Practical Data/World_Cities (2)/World_Cities.shp") %>%   
   st_transform(., 27700)
 ```
 
@@ -168,11 +172,13 @@ Worldcities2 <- Worldcities %>%
 
 
 # Load UK Outline and transform 227700 
-UK_outline <- st_read("gadm41_GBR_shp (1)/gadm41_GBR_0.shp") %>%   
+UK_outline <- st_read("Week 5 Practical Data/gadm41_GBR_shp (1)/gadm41_GBR_0.shp") %>%   
   st_transform(., 27700)
 ```
 
 ## 5.8. Join and Sum
+
+### Join Data
 
 To join 2 spatial features we use - `st_join()`
 
@@ -184,7 +190,7 @@ The output will be a large dataset where:
 
 -   `st_join()` defaults to a left join, so in this case the borough data is the left dataset and all the right data has been appended to it. If the left data (borough) had no matches (so no hotels) they would still appear in the final dataset. The default argument for this is `st_intersects` but we will explore this more next week.
 
-Ok, let's do the join!!
+Ok, let's do the join (spatially join airbnb and hotels)!!
 
 ```{r}
 Hotels <- st_join(Londonborough, OSM)
@@ -193,3 +199,63 @@ Airbnbs <- st_join(Londonborough, Airbnb)
 
 head(Hotels)
 ```
+
+### Group and Summarise Data
+
+Now, each hotel/ airbnb is a row and has the borough data appended
+
+We want one row per borough, and the count of the number of hotels/ airbnbs
+
+Therefore, we use g `group_by()`, which is always followed by `summarise()`
+
+-   `group_by()` creates temporary groups, if you were to print the data it would look the same as before just with the number of groups specified
+
+-   `summarise()` takes the groups and provides a summary, here a count per group.
+
+What we have done below is:
+
+1.  . (the dot) getting incoming data from the pipe %\>%
+2.  Split data into groups defined by GSS_CODE and NAME
+3.  Summarise data (collaspe each group into one row, computing count of rows: n() in that group, name the new column \`Accomodation count\`)
+4.  **`n()`** inside `summarise` refers to returning the number of rows in the current group!!
+
+```{r}
+Hotels_sum <- Hotels %>%
+  # We need to list the columns we want to keep in the summarise
+  group_by(., GSS_CODE, NAME) %>%
+  # For each group count the number of rows and store in a column called accomodation count
+  summarise(`Accomodation count` = n())
+
+
+Airbnb_sum <- Airbnbs %>%
+  group_by(., GSS_CODE, NAME) %>%
+  summarise(`Accomodation count` = n())
+```
+
+#### Problem with Spatial Join (like a left join):
+
+For boroughs with 0 hotels/ airbnbs, when we group_by and summarise, the borough will always keep at least one row -\> which will return a value of 1 even it is actually 0!!
+
+For Example:
+
+Let’s filter our Hotels object (the one we spatially joined on Bexley, then compare it to the Hotel sum data…
+
+(Chose Bexley as an example as I checked from Hotels, Bexley's whole row is NA NA NA NA)).
+
+```{r}
+# the st_join data = 0 Hotels in Bexley
+Hotels %>%
+  filter(NAME=="Bexley")
+```
+
+```{r}
+# the group by and summarise data = 1 Hotel in Bexley!
+Hotels_sum %>%
+  filter(NAME=="Bexley")
+```
+
+#### So, How to Fix This ?
+
+We can use a topological relationship!!
+
+It describes how two geometries relate in space—**without caring about exact distances or coordinates**, just their **relative arrangement**. Think “do they touch, overlap, sit inside, or are they separate?”
