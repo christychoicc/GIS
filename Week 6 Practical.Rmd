@@ -1,0 +1,26 @@
+---
+title: "Week 6 Practical"
+output: html_document
+---
+
+# Detecting Spatial Patterns
+
+## Clear Memory First !!
+
+```{r}
+rm(list = ls()) #removes all objects from workspace 
+gc() #clear memory
+```
+
+```{r}
+
+```
+
+```{r}
+library(spatstat)
+library(here)
+library(sp)
+library(tmap)
+library(sf)
+library(tmaptools)
+```
