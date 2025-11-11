@@ -13,10 +13,6 @@ gc() #clear memory
 ```
 
 ```{r}
-
-```
-
-```{r}
 library(spatstat)
 library(here)
 library(sp)
