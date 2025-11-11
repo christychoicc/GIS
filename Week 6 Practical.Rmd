@@ -5,8 +5,6 @@ output: html_document
 
 # Detecting Spatial Patterns
 
-## Clear Memory First !!
-
 ```{r}
 rm(list = ls()) #removes all objects from workspace 
 gc() #clear memory
