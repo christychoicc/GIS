@@ -6,11 +6,13 @@ output: html_document
 # Detecting Spatial Patterns
 
 ```{r}
-rm(list = ls()) #removes all objects from workspace 
-gc() #clear memory
+#clear memory
+rm(list = ls()) 
+gc()
 ```
 
 ```{r}
+# load packages
 library(spatstat)
 library(here)
 library(sp)
