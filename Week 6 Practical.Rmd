@@ -76,7 +76,7 @@ Good!! we see:
 
     -   min=3.15ha (That's tiny! should be City of London!), max=15,013ha(Bigger! maybe it's Bromley?)
 
-    -   strong skew (mean 4,832\>median 358) (=mean is sensitive to big values)
+    -   strong skew (mean 4,832\>median 358) (mean\>median is a strong hint of right-skewed!! = mean is sensitive to big values)
 
 ```{r}
 summary(BoroughMap)
