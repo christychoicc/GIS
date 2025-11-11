@@ -5,6 +5,10 @@ output: html_document
 
 # Detecting Spatial Patterns
 
+In this analysis we will analyse the patterns of Blue Plaques — you will see these placed on around the UK linking the buildings of the present to people of the past. - ***For any given London Borough, are the Blue Plaques within that borough distributed randomly or do they exhibit some kind of dispersed or clustered pattern?***
+
+-   We want to find out are plaques at random? clustered? or dispersed?
+
 ```{r}
 #clear memory
 rm(list = ls()) 
@@ -19,4 +23,61 @@ library(sp)
 library(tmap)
 library(sf)
 library(tmaptools)
+```
+
+## Setting Up Data 
+
+First, read in London Borough Boundaries (polygon)
+
+-   We set the study area so that we can know where points occurs later and define "random" or "clustered"!
+
+-   We also need this to clip Blue Plaques to London and tag each plaque with the borough
+
+-   And other things...
+
+```{r}
+#London Borough Boundaries
+LondonBoroughs <- st_read(here::here("Week 1 Practical Data", "statistical-gis-boundaries-london", "ESRI", "London_Borough_Excluding_MHW.shp"))
+
+#or you can use this:
+#LondonBoroughs <- st_read("https://opendata.arcgis.com/datasets/8edafbe3276d4b56aec60991cbddda50_4.geojson")
+```
+
+Second, we pull out London using `str_detect()` function from the `stringr` package in combination with `filter()` from `dplyr` (again!).
+
+We will look for the bit of the district code that relates to London (E09) from the ‘lad15cd’ column data frame of our `sf` object
+
+By doing this, we aim to achieve:
+
+-   Filter study area (London - E09 only)
+
+-   Project to meters: transform to 27700 (British National Grid so distances/ areas are in meters)
+
+```{r}
+library(stringr)
+library(dplyr)
+
+BoroughMap <- LondonBoroughs %>%
+  dplyr::filter(str_detect(GSS_CODE, "^E09")) %>%
+  st_transform(., 27700)
+
+qtm(BoroughMap)
+```
+
+Ok, now lets give a quick sanity check before we start any spatial stats!
+
+Good!! we see:
+
+-   Row length =33, we got all 33 London Boroughs
+
+-   Geometry type: MULTIPOLYGON: 33, all boroughs are multipolygons
+
+-   Area distribution:
+
+    -   min=3.15ha (That's tiny! should be City of London!), max=15,013ha(Bigger! maybe it's Bromley?)
+
+    -   strong skew (mean 4,832\>median 358) (=mean is sensitive to big values)
+
+```{r}
+summary(BoroughMap)
 ```
