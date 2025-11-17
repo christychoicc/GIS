@@ -81,3 +81,44 @@ Good!! we see:
 ```{r}
 summary(BoroughMap)
 ```
+
+Next Step: Blue Plaques (Points)
+
+In the above, we have loaded in the borough polygons, now we need the point patterns, so, now, we need to get the location of all Blue Plaques in the City (directly from the web):
+
+```{r}
+BluePlaques <- st_read("https://s3.eu-west-2.amazonaws.com/openplaques/open-plaques-london-2018-04-08.geojson")
+```
+
+```{r}
+summary(BluePlaques)
+```
+
+```{r}
+#plot the blue plaques in the city
+tmap_mode("plot")
+
+tm_shape(BoroughMap) +
+  tm_polygons(fill_alpha = 0.5)+
+tm_shape(BluePlaques) +
+  tm_dots(fill = "blue", size=0.1)
+```
+
+## Data Cleaning 
+
+In the above plotted map, we can see that there is at least 1 Blue Plaque that falls outside of the Borough boundaries!! These "Errant Plaques" (aka plaque points that don’t lie **inside** your study window (the London borough polygons) will cause problems with our analysis!!
+
+So, we need to clip the Plaques to the boundaries
+
+First step –\> is to remove any Plaques with the same grid reference as this will cause problems later on in the analysis...
+
+```{r}
+#remove duplicate rows
+library(tidyverse)
+
+library(sf)
+BluePlaques <- distinct(BluePlaques)
+# distinct() --> compares all columns in the data (aka it scans from top to bottom then keeps the first time it sees a particular row, then drops any later rows that are identical across every column)
+```
+
+## Spatial Subsetting
