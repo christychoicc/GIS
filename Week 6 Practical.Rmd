@@ -21,7 +21,7 @@ library(spatstat)
 library(here)
 library(sp)
 library(tmap)
-library(sf)
+library(sf) #sf = data frame + geometry + CRS
 library(tmaptools)
 ```
 
@@ -87,7 +87,8 @@ Next Step: Blue Plaques (Points)
 In the above, we have loaded in the borough polygons, now we need the point patterns, so, now, we need to get the location of all Blue Plaques in the City (directly from the web):
 
 ```{r}
-BluePlaques <- st_read("https://s3.eu-west-2.amazonaws.com/openplaques/open-plaques-london-2018-04-08.geojson")
+BluePlaques <- st_read("https://s3.eu-west-2.amazonaws.com/openplaques/open-plaques-london-2018-04-08.geojson")%>%
+  st_transform(.,27700)
 ```
 
 ```{r}
@@ -104,7 +105,7 @@ tm_shape(BluePlaques) +
   tm_dots(fill = "blue", size=0.1)
 ```
 
-## Data Cleaning 
+### Data Cleaning
 
 In the above plotted map, we can see that there is at least 1 Blue Plaque that falls outside of the Borough boundaries!! These "Errant Plaques" (aka plaque points that don’t lie **inside** your study window (the London borough polygons) will cause problems with our analysis!!
 
@@ -121,4 +122,231 @@ BluePlaques <- distinct(BluePlaques)
 # distinct() --> compares all columns in the data (aka it scans from top to bottom then keeps the first time it sees a particular row, then drops any later rows that are identical across every column)
 ```
 
-## Spatial Subsetting
+### Spatial Subsetting
+
+Selecting features **based on where they are** in space (their geometry), not based on their attribute values.
+
+In the below code, the second operator is blank (, ) –\> this controls which all columns/ attributes are kept
+
+The second position in `[rows, cols]` is left **blank** (`[,]`), which in base R means **keep all columns** (all attributes). You’re not dropping any fields now; you’ll tidy later with dplyr if needed.
+
+```{r}
+#drops any plaque points that don’t touch/lie within a London borough
+BluePlaquesSub <- BluePlaques[BoroughMap,]
+
+#plot the blue plaques in the city
+tmap_mode("plot")
+
+#check to see that they've been removed
+tm_shape(BoroughMap) +
+  tm_polygons(fill_alpha = 0.5)+
+tm_shape(BluePlaquesSub) +
+  tm_dots(fill = "blue", size=0.1)
+```
+
+When we spatial subset data like this there are different topological relations we can specify. The default is intersects (st_intersects: keeps point that touch/lie in the borough),
+
+But we could use BluePlaquesSub \<- BluePlaques[BoroughMap, , op = st_within], with the operator or op set to st_within (keeps only points **strictly inside** the borough polygons (no border-touch)), to identify points completely within the borough outline.
+
+Any topological operator from Week5 Mapping can be used here!
+
+```{r}
+# add sparse=false to get the complete matrix.
+# this is the same as select by location in QGIS
+# filter from dplyr is the same as select by attribute 
+intersect_indices <-st_intersects(BoroughMap, BluePlaques)
+```
+
+### Spatial Clipping
+
+**cutting geometries to a boundary** so that only the part **inside** a chosen area remains.
+
+-   If you clip **polygons/lines**, their shapes are **trimmed** to the boundary.
+
+<!-- -->
+
+-    If you clip **points**, it’s effectively the same as spatial **subsetting** (points outside are dropped; points inside are unchanged).
+
+-   **REMEMBER !! CRS must match** before clipping (`st_transform()`) !!
+
+-   Do this to keep data inside your study area (aka London only)
+
+### Key Advice
+
+When do I want to do what?
+
+1.  Spatial Subsetting
+    -   Select points or polygons in a polygon (aka selecting data by location)
+
+    -   What it does: keep or drop whole features based on a spatial test (inside, intersects within X meters, etc.)
+2.  Spatial Clipping
+    -   Determine where datasets overlap (or touch, or don’t overlap) and extract those parts
+3.  Spatial Joining
+    -   Join two spatial datasets together
+
+    -   Which can use spatial subsetting functions as the default is `st_intersects()`. This function joins spatial data.
+4.  Selecting Data by attributes
+    -   Filtering or selecting rows / columns with dplyr
+
+### Study Area
+
+1.  Subset our sf object to pull out a borough we are interested in (choosing Harrow in this practical)
+
+```{r}
+#extract the borough
+
+# select by attribute
+Harrow <- BoroughMap %>%
+  filter(., NAME=="Harrow") #keep rows where the NAME column equals "Harrow"
+
+#Check to see that the correct borough has been pulled out
+tm_shape(Harrow) +
+  tm_polygons(col = NA, fill_alpha = 0.5)
+```
+
+2.  Clip our Blue Plaques so we have a subset (only plaques that lie inside Harrow) of just those that fall within the borough or interest
+
+```{r}
+#clip the data to our single borough
+BluePlaquesSub <- BluePlaques[Harrow,]
+
+
+
+#check that it's worked
+tm_shape(Harrow) +
+  tm_polygons(fill_alpha = 0.5)+
+tm_shape(BluePlaquesSub) +
+  tm_dots(fill = "blue", size=0.1)
+```
+
+3.  Set up done! Can start our analysis using `spatstat`. Set up a window:
+    -   Create an observation window for `spatstat` to carry out its analysis within – we will set this to the extent of the Harrow Boundary
+
+        -   Observation window – **exact area in which points *could* have been observed** and in which you will test “random vs clustered vs dispersed.”
+
+        -   **In this practical – Define the window** as the Harrow polygon → tell spatstat “analyse **within this shape**.”
+
+```{r}
+#now set a window as the borough boundary
+window <- as.owin(Harrow)
+plot(window)
+```
+
+spatstat (built for spatial statistics) uses its own classes (which needs to be converted from you original sf objects before running tests like Ripley's K, nearest-neighbour ...)
+
+It does not work directly with Spatial PolygonsDataFrames or sf objects we are used to.
+
+For a **Point Pattern Analysis** (**statistical tests on point locations to detect randomness/ cluster/ dispersion**), we need to create a ppp object:
+
+-   **`owin`** = an *observation window* (the study region/shape (where points would occur))
+
+-   **`ppp`** = a *point pattern* (points **plus** the window, units, and optional marks)
+
+```{r}
+#older-but-still-common pattern
+#create a sp object: sf -> sp (SpatiaPointDataFrame)
+BluePlaquesSub<- BluePlaquesSub %>%
+  as(., 'Spatial')
+
+#create a spatstat ppp object
+#by passing those x/y vectors and the window (owin of Harrow)
+BluePlaquesSub.ppp <- ppp(x=BluePlaquesSub@coords[,1], 
+                          # extract X (easting vector) from sp
+                          y=BluePlaquesSub@coords[,2], 
+                          # extract Y (northing vector(how far east a point is from the grid’s false origin, in metres)) from sp
+                          window=window) 
+                          # an owin made from Harrow --> tells spatstat the exact region in which points are considered/analysed.
+```
+
+(Optional) To try understand the above code, run the below for elements of the code:
+
+```{r}
+BluePlaquesSub@coords[,1]
+
+#easting (X) → how far east the point is, in metres.
+#northing (Y) → how far north the point is, in metres.
+#BluePlaquesSub@coords[, 1] means: “give me all rows (:) from column 1 only” → the vector of eastings.
+
+#output values → distances in metres from a the grid's “false origin”
+#in this case: Harrow's easting of ~510,000-520,000, so the output values are sensible
+```
+
+Ok now look at the new ppp object:
+
+-   **visualising the point pattern** you built—an essential sanity check before running stats
+
+```{r}
+BluePlaquesSub.ppp %>%
+  plot(.,pch=16,cex=0.5, 
+       # call its plot method (plot.ppp)
+       # Plot BluwPlaquesSub point pattern, which plot.ppp draws the window(Harrow Boundary) and overlay the points
+       # pch= point symbol: 16 = filled circle
+       # cex= point size scaled to 50%
+       main="Blue Plaques Harrow")
+```
+
+## Point Pattern Analysis
+
+### Kernel Density Estimation (KDE)
+
+One way to summarise your point data is to plot the density of your points under a window called a 'Kernel'
+
+-   KDE turns a set of points into a **smooth surface** that estimates the **intensity** (points per unit area) at every location.
+
+<!-- -->
+
+-   size and shape of the Kernel affects the density pattern produced
+
+-   but it is very easy to produce a KDE map from a ppp object using the density() function.
+
+-   Benefits of a KDE
+
+    -   **Hotspot mapping:** see where plaques concentrate (exploratory “heatmap” with real units).
+
+    -   **Compare areas:** higher intensity ≈ more plaques **per area** 每個區域嘅斑塊多啲, not just more plaques overall 而唔係淨係整體上多啲斑塊.
+
+    -   **Inputs to modeling:** use KDE as a covariate 協變量 or to guide inhomogeneous tests 用嚟指導唔均勻嘅測試.
+
+    -   **Scale-aware:** change bandwidth to examine patterns at different distances (e.g., 200 m vs 1 km).
+
+    -   Helpful step to use in projects: **After subsetting to a borough:** make a KDE map to **visualise hotspots** (town centres, historic streets).
+
+```{r}
+BluePlaquesSub.ppp %>%  # 1) take your spatstat point pattern (ppp)
+  density(., sigma=500) %>%  # 2) compute a kernel density estimate with 500 m bandwidth
+  plot()  # 3) plot the resulting raster surface
+```
+
+***Sigma Values***
+
+-   Sigma – the bandwidth that controls how far each point's influence spreads
+
+-   It sets the diameter of the Kernel (in the units your map is in — in this case, as we are in British National Grid the units are in metres)
+
+***Try different sigma values – density estimate changes!!***
+
+-   small sigma value – narrow/ tall bumps
+
+    -   lots of **small circles** around each point; each circle is a peak.
+
+    -   Bumps **overlap less**, so you see **distinct little peaks** centered right on individual points.
+
+-   large sigma value – wide/low bumps
+
+    -   Instead of many sharp peaks, you get **broad hills/hotspots** showing **neighborhood-scale** patterns, not dot-by-dot wiggles.
+
+    -   circles **blend** into big blobs; individual points stop standing out.
+
+***How to choose the sigma value:***
+
+-   Street-/neighbourhood-scale hotspots → **300–600 m**
+
+-   Borough-wide trends → **800–1500 m**
+
+```{r}
+BluePlaquesSub.ppp %>%
+  density(., sigma=1000) %>%
+  plot()
+```
+
+## Quadrat Analysis
