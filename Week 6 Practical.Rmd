@@ -165,7 +165,7 @@ intersect_indices <-st_intersects(BoroughMap, BluePlaques)
 
 <!-- -->
 
--    If you clip **points**, it’s effectively the same as spatial **subsetting** (points outside are dropped; points inside are unchanged).
+-   If you clip **points**, it’s effectively the same as spatial **subsetting** (points outside are dropped; points inside are unchanged).
 
 -   **REMEMBER !! CRS must match** before clipping (`st_transform()`) !!
 
@@ -350,3 +350,111 @@ BluePlaquesSub.ppp %>%
 ```
 
 ## Quadrat Analysis
+
+Are distribution of points in our study area differs from 'complete spatial randomness' - CSR (careful not CRS!!) ?
+
+Basic test of CSR is using a quadrat analysis - using the `quadrat count` function in `spatstat`
+
+What it does it do (simple):
+
+-   **Divide** the study window into a grid of equal “quadrats” (cells).
+
+-   **Count** points in each cell.
+
+-   **Compare** the observed counts to what you’d expect under **Complete Spatial Randomness (CSR)**
+
+***What are we trying to do?***
+
+We want to decide whether the Blue Plaques (points) inside a borough look **random**, **clustered**, or **dispersed**.
+
+-   The idea is to compare what we **observed** to what we’d expect if points were placed **completely at random** inside the same borough. That “random” reference is **Complete Spatial Randomness (CSR)**, modeled by a **Poisson process**.
+
+***How does a quadrat analysis work? (Basically mentioned above but in easy understanding here)***
+
+1.  Lay a grid over the borough (window)
+2.  Count plaques per quadrat
+3.  Summarise Counts into a frequency table
+4.  Estimate the Poisson Mean, lambda
+    -   lambda –\> meanshow many plaques per cell on average
+
+    -   Under CSR, the number of points in an equal-area quadrat follows **Poisson(λ)**, where **λ = average plaques per quadrat**.
+5.  Compute expected counts under Poisson
+6.  Compare observed vs expected
+    -   See if your *observed* is **close to** the *expected* Poisson(λ) (→ **random**), or **too different** (→ **patterned**).
+
+```{r}
+#First plot the point patterns
+#Approach by drawing the window first, then the plaque points on top
+plot(BluePlaquesSub.ppp, #BluePlaquesSub.ppp is a ppp (points + window)
+     pch=16,
+     cex=0.5, 
+     main="Blue Plaques in Harrow")
+
+#now count the points in that fall in a 6 x 6
+#grid overlaid across the windowBluePlaquesSub.ppp2<-BluePlaquesSub.ppp %>%
+BluePlaquesSub.ppp %>%
+  quadratcount(.,nx = 6, ny = 6)%>%  
+  #6 by 6 grid over your window (Harrow) and count how many points fall in each cell
+    plot(., add=T, col="red")
+    # add = TRUE --> “draw on top of the current plot,” not a new one.
+```
+
+We want to know whether or not there is any kind of spatial patterning associated with the Blue Plaques in London –\> this means **comparing our observed distribution of points with a statistically likely (Complete Spatial Random) distribution** (將我哋觀察到嘅點分佈同一個統計上可能嘅（完全空間隨機）分佈比較), based on the Poisson distribution.
+
+-   the CSR (Poisson) null tells us what "random" should look like given your window and density so you can say whether what you see is more clustered/ regular than chance
+
+-   **Observed** = 真實藍牌位置（你見到嘅點）
+
+-   **CSR（Poisson）** = 假設喺同一個邊界入面、同平均密度下，點係**完全隨機**、互相**獨立**。
+
+Using the same `quadratcount()` function again (for the same sized grid) we can save the results into a table:
+
+```{r}
+#run the quadrat count
+Qcount <- BluePlaquesSub.ppp %>%
+  quadratcount(.,nx = 6, ny = 6) %>%
+  as.data.frame() %>%
+  dplyr::count(Var1=Freq)%>%
+  dplyr::rename(Freqquadratcount=n)
+```
+
+Check the data type in the first column - if it is factor –\> need to convert it to numeric
+
+```{r}
+Qcount %>% 
+  summarise_all(class)
+```
+
+Ok now we have created a frequency table (Qcount)
+
+Next we need to calculate our expected values. Using the Poisson Distribution formula for calculating expected probabilities.
+
+-   Equation
+
+    -   `x` is the number of occurrences
+
+    -   `λ` is the mean number of occurrences
+
+    -   `e` is a constant- 2.718
+
+-   Inside the code:
+
+    -   `Var1` = (in Qcount) = the count k in a quadrat
+
+    -   `Freqquadratcount` = the **number of quadrats** that had that count.
+
+```{r}
+sums <- Qcount %>%
+  #calculate the total blue plaques (Var * Freq)
+  mutate(total = Var1 * Freqquadratcount) %>%   # plaques contributed by each row
+  dplyr::summarise(across(everything(), sum))%>%  # sum over all rows
+  dplyr::select(-Var1) 
+
+lambda<- Qcount%>%
+  #calculate lambda
+  mutate(total = Var1 * Freqquadratcount)%>%
+  dplyr::summarise(across(everything(), sum)) %>%
+  mutate(lambda=total/Freqquadratcount) %>%  #repeats the same totals then this
+  dplyr::select(lambda)%>%
+  pull(lambda)
+```
