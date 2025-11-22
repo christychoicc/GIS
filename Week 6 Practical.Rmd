@@ -349,7 +349,7 @@ BluePlaquesSub.ppp %>%
   plot()
 ```
 
-## Quadrat Analysis
+## Quadrant Analysis
 
 Are distribution of points in our study area differs from 'complete spatial randomness' - CSR (careful not CRS!!) ?
 
@@ -411,11 +411,12 @@ Using the same `quadratcount()` function again (for the same sized grid) we ca
 
 ```{r}
 #run the quadrat count
+#Qcount is the observed frequency distribution of counts per quadrat
 Qcount <- BluePlaquesSub.ppp %>%
-  quadratcount(.,nx = 6, ny = 6) %>%
-  as.data.frame() %>%
-  dplyr::count(Var1=Freq)%>%
-  dplyr::rename(Freqquadratcount=n)
+  quadratcount(.,nx = 6, ny = 6) %>% #count how many plaques fall in each grid cell
+  as.data.frame() %>% #turn that object into a data frame: each row = one quarat (cell) , and make a column
+  dplyr::count(Var1=Freq)%>% 
+  dplyr::rename(Freqquadratcount=n) #rename to Freqquadratcount
 ```
 
 Check the data type in the first column - if it is factor –\> need to convert it to numeric
@@ -427,7 +428,7 @@ Qcount %>%
 
 Ok now we have created a frequency table (Qcount)
 
-Next we need to calculate our expected values. Using the Poisson Distribution formula for calculating expected probabilities.
+Next we need to calculate our expected values –\> using the Poisson Distribution formula for calculating expected probabilities.
 
 -   Equation
 
@@ -439,22 +440,296 @@ Next we need to calculate our expected values. Using the Poisson Distribution fo
 
 -   Inside the code:
 
-    -   `Var1` = (in Qcount) = the count k in a quadrat
+    -   `Var1` = (in Qcount) = the count of quadrats per quadrat
 
     -   `Freqquadratcount` = the **number of quadrats** that had that count.
 
 ```{r}
+#calculate the total blue plaques (Var * Freq)
 sums <- Qcount %>%
-  #calculate the total blue plaques (Var * Freq)
   mutate(total = Var1 * Freqquadratcount) %>%   # plaques contributed by each row
   dplyr::summarise(across(everything(), sum))%>%  # sum over all rows
-  dplyr::select(-Var1) 
+  dplyr::select(-Var1) #drop Var1 cus we summed everything in one row it no longer makes sense keeping a Var1 column after summing la on9
 
+#calculate lambda
 lambda<- Qcount%>%
-  #calculate lambda
   mutate(total = Var1 * Freqquadratcount)%>%
   dplyr::summarise(across(everything(), sum)) %>%
   mutate(lambda=total/Freqquadratcount) %>%  #repeats the same totals then this
   dplyr::select(lambda)%>%
-  pull(lambda)
+  pull(lambda) 
+
+  # lambda is the mean rate of points 
+  # (aka average number of plaques per quadrat, 
+  # it sets the poisson lambda you compare your observed counts against!!)
+```
+
+Calculate expected using the Poisson formula from above,
+
+k is the number of blue plaques counted in a square and is found in the first column of our table
+
+**What is done in the below code? :**
+
+-   computing the expected number of quadrats with plaques under a Poisson model (CSR)
+
+-   then plot observed vs expected to compare the two distributions
+
+```{r}
+QCountTable <- Qcount %>%
+  mutate(Pr=((lambda^Var1)*exp(-lambda))/factorial(Var1))%>%
+  #now calculate the expected counts based on our total number of plaques
+  #and save them to the table
+  mutate(Expected= (round(Pr * sums$Freqquadratcount, 0)))
+
+#Compare the frequency distributions of the observed and expected point patterns
+plot(c(1,5),c(0,14), type="n",
+xlab="Number of Blue Plaques (Red=Observed,Blue=Expected)", 
+     ylab="Frequency of Occurances")
+points(QCountTable$Freqquadratcount, 
+       col="Red", 
+       type="o", 
+       lwd=3)
+points(QCountTable$Expected, col="Blue", 
+       type="o", 
+       lwd=3)
+```
+
+Comparing the observed and expected frequencies for our quadrant counts
+
+-   can observe that they both have higher frequency counts at the lower end — something reminiscent (令人聯想到) of a Poisson distribution.
+
+-   this could indicate that for this particular set of quadrants, our pattern is close to Complete Spatial Randomness (i.e. no clustering or dispersal of points).
+
+To check this,
+
+We can use the `quadrat.test()` function, built into `spatstat`.
+
+-   This uses a **Chi Squared test** to **compare the observed and expected frequencies** for each quadrant (rather than for quadrant bins, as we have just computed above).
+
+    -   A Chi-Squared test determines if there is an association between two categorical variables. The higher the Chi-Squared value, the greater the difference.
+
+    -   If the p-value of our Chi-Squared test is \< 0.05, then we can reject a null hypothesis that says “there is no pattern - i.e. complete spatial randomness - in our data” (think of a null-hypothesis as the opposite of a hypothesis that says our data exhibit a pattern).
+
+    -   If our p-value is \> 0.05 then this indicates that we have CSR and there is no pattern in our points. If it is \< 0.05, this indicates that we do have clustering in our points.
+
+```{r}
+#runs the quadrat test for CSR on your Harrow plaques using a 6×6 grid
+teststats <- quadrat.test(BluePlaquesSub.ppp, nx = 6, ny = 6)
+```
+
+```{r}
+# layer two plots, the points and the quadrat residuals from the test above
+plot(BluePlaquesSub.ppp,pch=16,cex=0.5, main="Blue Plaques in Harrow")
+plot(teststats, add=T, col = "red") #overlay quadrat grid with numbers in each cell
+```
+
+```{r}
+teststats
+```
+
+Here, the **p-value = 0.2594** –\> implying complete spatial randomness (CSR)!!
+
+Potential Problems with Quadrant Analysis:
+
+-   Look back two codes above, there is a warning message of observed counts to be very small , this may affect the accuracy of the quadrant test
+
+-   Poisson Distribution –\> only describes observed occurances that are counted in integers –\> where our occurrences =0 (i.e. not observed) can raise issues.
+
+-   MAUP (modified areal unit problem)
+
+If try running a quadrant analysis for different grid arrangements (2x2 or 3x3 or 10x10...) What will happen???
+
+## Ripley's K
+
+Using the `spatstat` package using the `kest()` function.
+
+Tells you whether points are **clustered**, **random**, or **regular** at different **distance scales**.
+
+Compare the observed distribution of points with the Poisson random model for a whole range of different distance radii
+
+```{r}
+K <- BluePlaquesSub.ppp %>%
+  Kest(., correction="border") %>%
+  plot()
+```
+
+```{r}
+# we can also extract the plot into a dataframe
+Kval <- as.data.frame(Kest(BluePlaquesSub.ppp, correction = "Ripley"))
+```
+
+-   Definition in English: Ripley’s K value for any circle radius r =
+
+    -   The average density of points for the **entire study region (of all locations)** λ=(n/Πr2))
+
+    -   Multiplied by the sum of the distances dij between all points within that search radius, see [Dixon page 2](https://www3.nd.edu/~mhaenggi/ee87021/Dixon-K-Function.pdf) and [Amgad et al. 2015](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0144404)
+
+    -   Divided by the total number of points, n
+
+    -   I = 1 or 0 depending if dij<r
+
+The plot for K has a number of elements that are worth explaining.
+
+-   The *Kpois(r)* line in **Red is the theoretical value** of K for each distance window (r) under a Poisson assumption of Complete Spatial Randomness.
+
+-   The **Black line is the estimated values** of K accounting for the effects of the edge of the study area.
+
+The correction specifies how points towards the edge are dealt with
+
+-   In this case, border means that points towards the edge are ignored for the calculation but are included for the central points. [Section 2.1, here](https://www.statistics.gov.hk/wsc/IPS031-P2-S.pdf) explains the different options.
+
+-   How to read it:
+
+    -   **Black above red** ⇒ **more neighbours** within rrr than CSR ⇒ **clustering** at that scale.
+
+    -   **Black below red** ⇒ **fewer neighbours** within rrr than CSR ⇒ **regularity/dispersion** at that scale.
+
+    -   **Black ≈ red** ⇒ looks **random** at that scale.
+
+        -   Where the value of K falls above the line, the data appear to be clustered (聚集) at that distance. Where the value of K is below the line, the data are dispersed (分散).
+
+            -   From the graph, we can see that up until distances of around 1300 metres, (**Black above red**) Blue Plaques appear to be clustered (聚集) in Harrow, however, at around 1500 m, the distribution appears random (**black and red meets**) and then dispersed(分散) between about 1600 and 2100 meters (**black below red**).
+
+## Alternatives to Ripley's K
+
+Not compulsory - if interested refer to <https://andrewmaclachlan.github.io/CASA0005repo/detecting-spatial-patterns.html#alternatives-to-ripleys-k>
+
+## Density-based spatial clustering of applications with noise: DBSCAN
+
+DBSCAN discovers clusters in space (be this physical space or variable space) - tell us **WHERE** in our area of interest the clusters are occurring.
+
+aka the clustering algorithm that finds groups of points that are close and dense, and labels the rest as noise. The core idea is
+
+-   a circus of radius (eps) around each point
+
+-   if a point has at least minpts neighbours inside that circle its a core point
+
+-   唔靠近任何 circle 嘅 points 會變成 **noise (points that don’t belong to any cluster)**（aka unclustered）
+
+```{r}
+library(fpc)
+```
+
+Now we carry out a DBSCAN analysis of blue plaques in my borough to see if there are any clusters present:
+
+```{r}
+#first check the coordinate reference system of the Harrow spatial polygon:
+st_geometry(BoroughMap)
+```
+
+DBSCAN requires you to input two parameters:
+
+1.  *Epsilon* - this is the radius within which the algorithm with search for clusters
+2.  *MinPts* - this is the minimum number of points that should be considered a cluster
+
+Based on the results of the Ripley’s K analysis earlier,
+
+-   We can see that we are getting clustering up to a radius of around 1200m, with the largest bulge (最大嘅凸起/ gap) in the graph at around 700m.
+
+-   Therefore, 700m is probably a good place to start and we will begin by searching for clusters of at least 4 points…
+
+```{r}
+#first extract the points from the spatial points data frame
+BluePlaquesSubPoints <- BluePlaquesSub %>%
+  coordinates(.)%>%
+  as.data.frame()
+
+#now run the dbscan analysis
+db <- BluePlaquesSubPoints %>%
+  fpc::dbscan(.,eps = 700, MinPts = 4)
+
+#now plot the results
+plot(db, BluePlaquesSubPoints, main = "DBSCAN Output", frame = F)
+plot(BoroughMap$geometry, add=T)
+```
+
+You could also use `kNNdistplot()` from the `dbscan` package to find a suitable eps value based on the ‘knee’ in the plot…
+
+```{r}
+# used to find suitable eps value based on the knee in plot
+# k is no of nearest neighbours used, use min points
+library(dbscan)
+
+BluePlaquesSubPoints%>%
+  dbscan::kNNdistplot(.,k=4)
+```
+
+-   This plot shows for each point the average distance to the k neighbours (對於每個 point，睇下佢最近嘅neighbours), which are then plotted in ascending order.
+
+-   The knee is where this value (of distance to neighbours) increases.
+
+So the DBSCAN analysis shows that for these values of eps and MinPts there are three clusters in the area I am analysing.
+
+Now of course the plot above is a little basic and doesn’t look very aesthetically pleasing. We can always produce a much nicer plot by extracting the useful information from the DBSCAN output and use `ggplot2` to produce a cool map…
+
+```{r}
+library(ggplot2)
+```
+
+Our new db object contains lots of info including cluster each set of point coordinates belongs to, whether the point is a seed point or a border point etc. So, lets get a summary by calling the object:
+
+```{r}
+db
+```
+
+```{r}
+db$cluster
+```
+
+We can now add this cluster membership info back into our dataframe:
+
+-   **Cluster membership** = the label that says **which cluster each point belongs to** (or that it’s **noise**)
+
+```{r}
+BluePlaquesSubPoints<- BluePlaquesSubPoints %>%
+  mutate(dbcluster=db$cluster)
+```
+
+Next we are going to create some convex hull polygons to wrap around the points in our clusters. This means we will create a smallest polygon that encloses the set of points of each cluster. We will
+
+-   convert this dataframe to an sf object
+
+-   make convex hulls around the clusters
+
+-   plot
+
+```{r}
+# convert the data frame to sf
+BluePlaquesSubPoints_sf <- st_as_sf(BluePlaquesSubPoints, 
+                                    coords = c("coords.x1", "coords.x2"), 
+                                    crs = 27700)
+
+# make the convex hulls around the cluster points
+chull_polygons <- BluePlaquesSubPoints_sf %>%
+  # remove any points not in a cluster
+  filter(dbcluster>0)%>%
+  group_by(dbcluster) %>%
+  summarise(geometry = st_combine(geometry)) %>%  # combine points
+  mutate(geometry = st_convex_hull(geometry)) %>% # convex hull
+  st_as_sf()
+```
+
+Now create a ggplot2 object from our data:
+
+-   `fill` is for the interior colour (e.g. polygons)
+
+-   `color` is for borders and points
+
+```{r}
+library(ggspatial)
+library(ggplot2) #loaded above but somehow got errors load again here
+```
+
+```{r}
+# Create the map
+ggplot() +
+  annotation_map_tile(zoom = 13) +
+  geom_sf(data = BluePlaquesSubPoints_sf, aes(color=dbcluster), size = 3)+
+  geom_sf(data = chull_polygons, aes(fill = dbcluster), 
+          alpha = 0.8, 
+          # remove polygon borders
+          color = NA, 
+          show.legend = FALSE) +
+
+  theme_bw()
 ```
